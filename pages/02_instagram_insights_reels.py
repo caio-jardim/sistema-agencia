@@ -1,25 +1,24 @@
 import streamlit as st
 import time
-import random
 import os
 import json
+import requests
 import gspread
 from oauth2client.service_account import ServiceAccountCredentials
-from instagrapi import Client
+from apify_client import ApifyClient # <--- TROCA DE INSTAGRAPI POR APIFY
 import google.generativeai as genai
 from datetime import datetime, timedelta, timezone
 
 # --- CONFIGURAÇÃO DA PÁGINA ---
-st.set_page_config(page_title="Viral Analyzer Pro", page_icon="📈")
+st.set_page_config(page_title="Viral Analyzer Pro (Apify)", page_icon="📈")
 
-st.title("📈 Viral Analyzer Pro + IA")
+st.title("📈 Viral Analyzer Pro + IA (Via Apify)")
 st.markdown("---")
 
 # --- CONFIGURAÇÕES LATERAIS ---
 with st.sidebar:
     st.header("⚙️ Parâmetros")
     
-    # Input de perfis (separados por vírgula para facilitar)
     perfis_input = st.text_area("Perfis (separe por vírgula)", "rodrigojanesbraga")
     PERFIS_ALVO = [x.strip() for x in perfis_input.split(',') if x.strip()]
     
@@ -27,27 +26,23 @@ with st.sidebar:
     TOP_VIDEOS = st.number_input("Top Vídeos para salvar", min_value=1, value=5)
     TOP_ANALISE_IA = st.number_input("Analisar com IA (Top X)", min_value=0, value=1)
     
-    st.warning("⚠️ O login no Instagram pode gerar desafios de segurança se rodado na nuvem.")
+    st.success("✅ Modo Nuvem Ativo (Sem login/senha)")
 
 # --- FUNÇÕES ---
 
 def conectar_sheets():
     scope = ["https://spreadsheets.google.com/feeds", "https://www.googleapis.com/auth/drive"]
-    
-    # SEGURANÇA: Lê do secrets.toml
     try:
         creds_dict = dict(st.secrets["gcp_service_account"])
         creds = ServiceAccountCredentials.from_json_keyfile_dict(creds_dict, scope)
         client = gspread.authorize(creds)
         
-        nome_planilha = "Conteudo" # Você pode colocar no secrets ou deixar fixo
-        
+        nome_planilha = "Conteudo"
         try:
             sheet = client.open(nome_planilha).sheet1
         except:
             sh = client.create(nome_planilha)
             sheet = sh.sheet1
-            # Cria cabeçalho se for nova
             sheet.append_row([
                 "Data Coleta", "Perfil", "Janela", "Rank", "Data Post", 
                 "Views (Play)", "Likes", "Comentários", "Link", 
@@ -58,15 +53,24 @@ def conectar_sheets():
         st.error(f"Erro Sheets: {e}")
         return None
 
+def baixar_video_url(url, filename):
+    """Baixa o vídeo da URL fornecida pelo Apify"""
+    try:
+        response = requests.get(url, stream=True)
+        response.raise_for_status()
+        with open(filename, 'wb') as f:
+            for chunk in response.iter_content(chunk_size=8192):
+                f.write(chunk)
+        return True
+    except Exception as e:
+        print(f"Erro download: {e}")
+        return False
+
 def analisar_video_com_gemini(video_path):
-    """Envia vídeo para o Gemini e retorna JSON"""
-    # Configura API Key do secrets
     genai.configure(api_key=st.secrets["gemini_api_key"])
-    
     generation_config = {
       "temperature": 0.4,
       "top_p": 0.95,
-      "top_k": 40,
       "max_output_tokens": 8192,
       "response_mime_type": "application/json",
     }
@@ -83,14 +87,13 @@ def analisar_video_com_gemini(video_path):
                 return {"transcricao": "Erro", "ganchos_verbais": "Falha proc.", "ganchos_visuais": "-"}
 
             prompt = """
-            Você é um especialista em viralização de Reels. Analise este vídeo e retorne um JSON exato com estas chaves:
+            Você é um especialista em viralização de Reels. Analise este vídeo e retorne um JSON exato:
             {
                 "transcricao": "Texto completo do que foi falado",
                 "ganchos_verbais": "Quais frases exatas foram usadas no início para prender a atenção?",
-                "ganchos_visuais": "O que acontece visualmente nos primeiros 3 segundos que prende o olho? (Mudança de cena, texto na tela, movimento)"
+                "ganchos_visuais": "O que acontece visualmente nos primeiros 3 segundos que prende o olho?"
             }
             """
-            
             model = genai.GenerativeModel("gemini-2.0-flash", generation_config=generation_config)
             response = model.generate_content([video_file, prompt])
             
@@ -98,183 +101,161 @@ def analisar_video_com_gemini(video_path):
             return json.loads(response.text)
             
     except Exception as e:
-        st.error(f"Erro Gemini: {e}")
         return {"transcricao": "Erro API", "ganchos_verbais": "-", "ganchos_visuais": "-"}
 
-def pegar_dados_manuais(cl, user_id, dias, container_log):
-    """Lógica de coleta adaptada para interface visual"""
+def pegar_dados_apify(perfil, dias, container_log):
+    """
+    Substitui a lógica manual pela API profissional do Apify.
+    Usa o Actor: apify/instagram-scraper
+    """
+    if "apify_token" not in st.secrets:
+        st.error("Token da Apify não configurado no secrets.toml")
+        return []
+
+    client = ApifyClient(st.secrets["apify_token"])
     items_coletados = []
-    next_max_id = None
-    data_limite = datetime.now(timezone.utc) - timedelta(days=dias)
-    MAX_PAGINAS = 80
     
-    container_log.info(f"📅 Buscando até: {data_limite.strftime('%d/%m/%Y')}")
+    # Configuração da busca no Apify
+    # Limitamos a busca para não gastar créditos demais (ex: 50 posts)
+    run_input = {
+        "usernames": [perfil],
+        "resultsLimit": 50, 
+        "searchLimit": 1,
+        "searchType": "hashtag", # Padrão
+    }
 
-    pagina = 0
-    while True:
-        pagina += 1
-        if pagina > MAX_PAGINAS: break
+    container_log.info(f"📡 Conectando aos servidores da Apify para ler @{perfil}...")
 
-        try:
-            params = {'count': 12}
-            if next_max_id: params['max_id'] = next_max_id
+    try:
+        # Executa o robô na nuvem deles
+        run = client.actor("apify/instagram-scraper").call(run_input=run_input)
+        
+        # Pega os resultados
+        dataset_items = client.dataset(run["defaultDatasetId"]).list_items().items
+        
+        data_limite = datetime.now(timezone.utc) - timedelta(days=dias)
+        
+        for item in dataset_items:
+            # Filtra apenas Vídeos/Reels
+            if item.get('type') not in ['Video', 'Reel', 'Sidecar']: 
+                continue
+                
+            # Tratamento de data (Apify retorna ISO string)
+            ts_str = item.get('timestamp')
+            if not ts_str: continue
             
-            # Request privado
-            resultado = cl.private_request(f"feed/user/{user_id}/", params=params)
-            items = resultado.get('items', [])
-            next_max_id = resultado.get('next_max_id')
-            
-            if not items: break
+            # Converte string iso para objeto datetime
+            try:
+                data_post = datetime.strptime(ts_str, "%Y-%m-%dT%H:%M:%S.%fZ").replace(tzinfo=timezone.utc)
+            except:
+                continue # Pula se data for inválida
 
-            for item in items:
-                ts = item.get('taken_at')
-                data_post = datetime.fromtimestamp(ts, timezone.utc)
-                
-                if data_post < data_limite:
-                    return items_coletados 
-                
-                if item.get('media_type') == 2:
-                    views = item.get('play_count') or item.get('view_count', 0)
-                    caption_obj = item.get('caption')
-                    legenda = caption_obj.get('text', '') if caption_obj else ''
-                    
-                    items_coletados.append({
-                        "pk": item.get('pk'),
-                        "data_str": data_post.strftime("%d/%m/%Y"),
-                        "views": views, 
-                        "likes": item.get('like_count', 0),
-                        "comments": item.get('comment_count', 0),
-                        "link": f"https://www.instagram.com/p/{item.get('code')}/",
-                        "caption": legenda[:100] + "..."
-                    })
+            if data_post < data_limite:
+                continue
+
+            # Pega URL do vídeo (Apify entrega a URL direta do CDN)
+            video_url = item.get('videoUrl')
+            if not video_url and item.get('type') == 'Sidecar':
+                 # Se for carrossel, tenta pegar o primeiro vídeo
+                 children = item.get('childPosts', [])
+                 if children and children[0].get('type') == 'Video':
+                     video_url = children[0].get('videoUrl')
+
+            if not video_url: continue
+
+            # Padroniza os dados
+            items_coletados.append({
+                "pk": item.get('id'),
+                "data_str": data_post.strftime("%d/%m/%Y"),
+                "views": item.get('videoViewCount', 0) or item.get('playCount', 0),
+                "likes": item.get('likesCount', 0),
+                "comments": item.get('commentsCount', 0),
+                "link": f"https://www.instagram.com/p/{item.get('shortCode')}/",
+                "caption": (item.get('caption') or "")[:100] + "...",
+                "download_url": video_url # URL para baixar depois
+            })
             
-            if not next_max_id: break
-            time.sleep(random.randint(2, 5)) 
-                
-        except Exception as e:
-            container_log.warning(f"Erro leve no scan: {e}")
-            break
-            
+    except Exception as e:
+        st.error(f"Erro na Apify: {e}")
+        return []
+
     return items_coletados
 
 # --- BOTÃO PRINCIPAL ---
-if st.button("🚀 Iniciar Análise", type="primary"):
+if st.button("🚀 Iniciar Análise (Apify)", type="primary"):
     
-    # 1. Login Instagram (Modo Inteligente com Cache)
-    cl = Client()
-    
-    # Tenta carregar sessão salva para não logar do zero (evita ban)
-    session_file = "session.json"
-    
-    try:
-        if os.path.exists(session_file):
-            cl.load_settings(session_file)
-            # Tenta fazer uma ação leve para ver se a sessão ainda vale
-            cl.get_timeline_feed() 
-            st.success("✅ Login recuperado via Sessão (Mais seguro)!")
-        else:
-            # Se não tem sessão, faz o login real
-            cl.login(st.secrets["instagram"]["user"], st.secrets["instagram"]["pass"])
-            cl.dump_settings(session_file) # Salva para a próxima
-            st.success("✅ Novo Login realizado e Salvo!")
-            
-    except Exception as e:
-        st.warning(f"Sessão falhou, tentando login forçado... Erro: {e}")
-        try:
-            # Tenta login forçado se a sessão falhou
-            cl = Client()
-            cl.login(st.secrets["instagram"]["user"], st.secrets["instagram"]["pass"])
-            cl.dump_settings(session_file)
-            st.success("✅ Login Forçado Realizado!")
-        except Exception as e2:
-            st.error(f"❌ Falha crítica no Login: {e2}")
-            st.info("Dica: Se estiver rodando no Streamlit Cloud, o Instagram bloqueia IPs de datacenter. Rode localmente no VS Code.")
-            st.stop()
-
-    # 2. Conexão Sheets
+    # 1. Sheets
     sheet = conectar_sheets()
     if not sheet: st.stop()
 
     timestamp = datetime.now().strftime("%d/%m/%Y %H:%M")
     
-    # Criar pasta temp
     if not os.path.exists('temp_videos'):
         os.makedirs('temp_videos')
 
-    # Loop Perfis
     for perfil in PERFIS_ALVO:
         st.subheader(f"🔍 @{perfil}")
         log_box = st.expander("Logs do Processamento", expanded=True)
         
-        try:
-            user_info = cl.user_info_by_username_v1(perfil)
+        with log_box:
+            # Chama a nova função do Apify
+            videos = pegar_dados_apify(perfil, DIAS_ANALISE, st)
+        
+        if not videos:
+            st.warning("Nenhum vídeo recente encontrado.")
+            continue
             
-            with log_box:
-                videos = pegar_dados_manuais(cl, user_info.pk, DIAS_ANALISE, st)
+        # Ordenação
+        top_final = sorted(videos, key=lambda x: x['views'], reverse=True)[:TOP_VIDEOS]
+        st.write(f"🏆 Top {len(top_final)} vídeos identificados.")
+        
+        rows = []
+        barra = st.progress(0)
+        
+        for i, v in enumerate(top_final):
+            rank = i + 1
+            ia_data = {"transcricao": "", "ganchos_verbais": "", "ganchos_visuais": ""}
             
-            if not videos:
-                st.warning("Nenhum vídeo recente encontrado.")
-                continue
+            # IA Analysis
+            if rank <= TOP_ANALISE_IA:
+                st.info(f"⭐ Baixando e analisando Top {rank} ({v['views']} views)...")
                 
-            # Ordenação
-            top_final = sorted(videos, key=lambda x: x['views'], reverse=True)[:TOP_VIDEOS]
-            st.write(f"🏆 Top {len(top_final)} vídeos identificados.")
-            
-            rows = []
-            barra = st.progress(0)
-            
-            for i, v in enumerate(top_final):
-                rank = i + 1
-                ia_data = {"transcricao": "", "ganchos_verbais": "", "ganchos_visuais": ""}
+                caminho_video_temp = os.path.join('temp_videos', f"{v['pk']}.mp4")
                 
-                # IA Analysis
-                if rank <= TOP_ANALISE_IA:
-                    st.info(f"⭐ Analisando vídeo Top {rank} ({v['views']} views) com IA...")
+                # Baixa o vídeo da URL do Apify
+                sucesso_download = baixar_video_url(v['download_url'], caminho_video_temp)
+                
+                if sucesso_download:
                     try:
-                        # Download seguro
-                        video_path = cl.video_download(v['pk'], folder='temp_videos')
-                        
-                        # Analisa
-                        ia_data = analisar_video_com_gemini(video_path)
-                        
-                        # Limpa
-                        if os.path.exists(video_path):
-                            os.remove(video_path)
-                            
-                        # Delay de segurança
-                        time.sleep(5)
-                        
+                        ia_data = analisar_video_com_gemini(caminho_video_temp)
+                        time.sleep(2)
                     except Exception as e:
-                        st.error(f"Erro na IA/Download: {e}")
+                        st.error(f"Erro IA: {e}")
+                    finally:
+                        if os.path.exists(caminho_video_temp):
+                            os.remove(caminho_video_temp)
+                else:
+                    st.warning("Falha ao baixar vídeo para análise.")
 
-                # Monta linha
-                rows.append([
-                    timestamp, f"@{perfil}", f"{DIAS_ANALISE}d", f"{rank}º",
-                    v['data_str'], v['views'], v['likes'], v['comments'], v['link'],
-                    ia_data.get('transcricao', ''),
-                    ia_data.get('ganchos_verbais', ''),
-                    ia_data.get('ganchos_visuais', '')
-                ])
-                
-                # Atualiza barra
-                barra.progress((i + 1) / len(top_final))
+            # Monta linha
+            rows.append([
+                timestamp, f"@{perfil}", f"{DIAS_ANALISE}d", f"{rank}º",
+                v['data_str'], v['views'], v['likes'], v['comments'], v['link'],
+                ia_data.get('transcricao', ''),
+                ia_data.get('ganchos_verbais', ''),
+                ia_data.get('ganchos_visuais', '')
+            ])
+            
+            barra.progress((i + 1) / len(top_final))
 
-            # Salva no Sheets
-            sheet.append_rows(rows)
-            st.success(f"✅ Dados de @{perfil} salvos com sucesso!")
-            time.sleep(5)
-
-        except Exception as e:
-            st.error(f"Erro crítico no perfil @{perfil}: {e}")
+        sheet.append_rows(rows)
+        st.success(f"✅ @{perfil} finalizado!")
+        time.sleep(2)
     
-    # Limpeza final
+    # Limpeza
     try:
-        if os.path.exists('temp_videos'):
-            for f in os.listdir('temp_videos'):
-                os.remove(os.path.join('temp_videos', f))
-            os.rmdir('temp_videos')
-    except:
-        pass
+        os.rmdir('temp_videos')
+    except: pass
 
     st.balloons()
-    st.success("🏁 Análise Geral Finalizada!")
+    st.success("🏁 Processo Finalizado!")
