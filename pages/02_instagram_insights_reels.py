@@ -115,13 +115,13 @@ def pegar_dados_apify(perfil, dias, container_log):
     client = ApifyClient(st.secrets["apify_token"])
     items_coletados = []
     
-    # Configuração da busca no Apify
-    # Limitamos a busca para não gastar créditos demais (ex: 50 posts)
+    # --- CORREÇÃO AQUI ---
+    # Removidos parâmetros de hashtag que estavam confundindo o robô.
+    # Adicionado "resultsType": "posts" para garantir que ele pegue o feed.
     run_input = {
         "usernames": [perfil],
-        "resultsLimit": 50, 
-        "searchLimit": 1,
-        "searchType": "hashtag", # Padrão
+        "resultsLimit": 30,        # Limite de posts para analisar
+        "resultsType": "posts",    # <--- IMPORTANTE: Força buscar posts, não só info do perfil
     }
 
     container_log.info(f"📡 Conectando aos servidores da Apify para ler @{perfil}...")
@@ -130,14 +130,22 @@ def pegar_dados_apify(perfil, dias, container_log):
         # Executa o robô na nuvem deles
         run = client.actor("apify/instagram-scraper").call(run_input=run_input)
         
+        # Verifica se o run realmente rodou
+        if not run:
+            st.error("Erro: O Apify não retornou nenhuma execução.")
+            return []
+
         # Pega os resultados
         dataset_items = client.dataset(run["defaultDatasetId"]).list_items().items
+        
+        container_log.info(f"📦 Apify retornou {len(dataset_items)} itens brutos. Filtrando...")
         
         data_limite = datetime.now(timezone.utc) - timedelta(days=dias)
         
         for item in dataset_items:
-            # Filtra apenas Vídeos/Reels
-            if item.get('type') not in ['Video', 'Reel', 'Sidecar']: 
+            # Filtra apenas Vídeos/Reels (O Apify pode chamar de 'GraphVideo' ou 'Video')
+            tipo = item.get('type')
+            if tipo not in ['Video', 'Reel', 'Sidecar', 'GraphVideo']: 
                 continue
                 
             # Tratamento de data (Apify retorna ISO string)
@@ -146,33 +154,42 @@ def pegar_dados_apify(perfil, dias, container_log):
             
             # Converte string iso para objeto datetime
             try:
-                data_post = datetime.strptime(ts_str, "%Y-%m-%dT%H:%M:%S.%fZ").replace(tzinfo=timezone.utc)
+                # Tenta formato com Z ou sem
+                if ts_str.endswith('Z'):
+                    data_post = datetime.strptime(ts_str, "%Y-%m-%dT%H:%M:%S.%fZ").replace(tzinfo=timezone.utc)
+                else:
+                    data_post = datetime.strptime(ts_str, "%Y-%m-%dT%H:%M:%S").replace(tzinfo=timezone.utc)
             except:
                 continue # Pula se data for inválida
 
             if data_post < data_limite:
                 continue
 
-            # Pega URL do vídeo (Apify entrega a URL direta do CDN)
+            # Pega URL do vídeo
             video_url = item.get('videoUrl')
-            if not video_url and item.get('type') == 'Sidecar':
-                 # Se for carrossel, tenta pegar o primeiro vídeo
+            
+            # Se for carrossel (Sidecar), tenta pegar o primeiro vídeo
+            if not video_url and tipo == 'Sidecar':
                  children = item.get('childPosts', [])
-                 if children and children[0].get('type') == 'Video':
-                     video_url = children[0].get('videoUrl')
+                 if children:
+                     for child in children:
+                         if child.get('type') == 'Video':
+                             video_url = child.get('videoUrl')
+                             break # Pega o primeiro vídeo achado
 
+            # Se mesmo assim não achou url de video (ex: é foto), pula
             if not video_url: continue
 
             # Padroniza os dados
             items_coletados.append({
                 "pk": item.get('id'),
                 "data_str": data_post.strftime("%d/%m/%Y"),
-                "views": item.get('videoViewCount', 0) or item.get('playCount', 0),
+                "views": item.get('videoViewCount', 0) or item.get('playCount', 0) or 0,
                 "likes": item.get('likesCount', 0),
                 "comments": item.get('commentsCount', 0),
                 "link": f"https://www.instagram.com/p/{item.get('shortCode')}/",
-                "caption": (item.get('caption') or "")[:100] + "...",
-                "download_url": video_url # URL para baixar depois
+                "caption": (item.get('caption') or "")[:300] + "...",
+                "download_url": video_url
             })
             
     except Exception as e:
