@@ -160,15 +160,36 @@ def pegar_dados_manuais(cl, user_id, dias, container_log):
 # --- BOTÃO PRINCIPAL ---
 if st.button("🚀 Iniciar Análise", type="primary"):
     
-    # 1. Login Instagram
+    # 1. Login Instagram (Modo Inteligente com Cache)
     cl = Client()
+    
+    # Tenta carregar sessão salva para não logar do zero (evita ban)
+    session_file = "session.json"
+    
     try:
-        # Tenta login com credenciais seguras
-        cl.login(st.secrets["instagram"]["user"], st.secrets["instagram"]["pass"])
-        st.success("✅ Login no Instagram realizado!")
+        if os.path.exists(session_file):
+            cl.load_settings(session_file)
+            # Tenta fazer uma ação leve para ver se a sessão ainda vale
+            cl.get_timeline_feed() 
+            st.success("✅ Login recuperado via Sessão (Mais seguro)!")
+        else:
+            # Se não tem sessão, faz o login real
+            cl.login(st.secrets["instagram"]["user"], st.secrets["instagram"]["pass"])
+            cl.dump_settings(session_file) # Salva para a próxima
+            st.success("✅ Novo Login realizado e Salvo!")
+            
     except Exception as e:
-        st.error(f"❌ Falha no Login: {e}")
-        st.stop()
+        st.warning(f"Sessão falhou, tentando login forçado... Erro: {e}")
+        try:
+            # Tenta login forçado se a sessão falhou
+            cl = Client()
+            cl.login(st.secrets["instagram"]["user"], st.secrets["instagram"]["pass"])
+            cl.dump_settings(session_file)
+            st.success("✅ Login Forçado Realizado!")
+        except Exception as e2:
+            st.error(f"❌ Falha crítica no Login: {e2}")
+            st.info("Dica: Se estiver rodando no Streamlit Cloud, o Instagram bloqueia IPs de datacenter. Rode localmente no VS Code.")
+            st.stop()
 
     # 2. Conexão Sheets
     sheet = conectar_sheets()
