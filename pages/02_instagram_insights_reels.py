@@ -115,13 +115,14 @@ def pegar_dados_apify(perfil, dias, container_log):
     client = ApifyClient(st.secrets["apify_token"])
     items_coletados = []
     
-    # --- AJUSTE CRÍTICO: Usando URL Direta ---
-    # Isso força o robô a visitar a página, resolvendo o erro de "0 requests"
+    # --- AJUSTE FINAL ---
+    # searchType: "user" (Para passar na validação)
+    # directUrls: Link explícito (Para o robô não se perder na busca)
     run_input = {
         "directUrls": [f"https://www.instagram.com/{perfil}/"],
         "resultsType": "posts",
-        "resultsLimit": 30,      # Pega os 30 últimos posts
-        "searchType": "url",     # Avisa que estamos enviando uma URL
+        "resultsLimit": 30,
+        "searchType": "user",  # <--- MUDANÇA AQUI (Era 'url', agora é 'user')
         "proxy": {
             "useApifyProxy": True,
             "apifyProxyGroups": ["RESIDENTIAL"] 
@@ -172,7 +173,7 @@ def pegar_dados_apify(perfil, dias, container_log):
             
             # Lógica para Carrossel (Sidecar)
             if not video_url and 'Sidecar' in str(tipo):
-                 children = item.get('childPosts', []) or item.get('children', []) # As vezes chama children
+                 children = item.get('childPosts', []) or item.get('children', [])
                  if children:
                      for child in children:
                          if child.get('type') == 'Video' or child.get('is_video'):
@@ -183,7 +184,6 @@ def pegar_dados_apify(perfil, dias, container_log):
             if not video_url: continue
 
             # Padroniza os dados
-            # Tenta pegar caption de varios lugares possiveis
             legenda = item.get('caption') or item.get('description') or ""
             
             items_coletados.append({
