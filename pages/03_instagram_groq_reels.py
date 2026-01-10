@@ -253,4 +253,35 @@ if st.button("🚀 Iniciar Análise Groq", type="primary"):
                     if ia_data['transcricao'] and len(ia_data['transcricao']) > 10:
                         with st.expander(f"📄 Ver Transcrição Vídeo {rank}"):
                             st.caption(f"Gancho: {ia_data['ganchos_verbais']}")
-                            st
+                            st.write(ia_data['transcricao'])
+                    
+                    time.sleep(2) # Delay leve
+
+                # Monta Linha
+                rows.append([
+                    timestamp, f"@{perfil}", f"{DIAS_ANALISE}d", f"{rank}º",
+                    v['data_str'], v['views'], v['likes'], v['comments'], v['link'],
+                    v['caption'],
+                    ia_data.get('transcricao', ''), 
+                    ia_data.get('ganchos_verbais', '')
+                ])
+                
+                barra.progress((i + 1) / len(top_final))
+
+            sheet.append_rows(rows)
+            st.toast(f"@{perfil} salvo com sucesso!", icon="✅")
+            time.sleep(5)
+
+        except Exception as e:
+            st.error(f"Erro crítico @{perfil}: {e}")
+
+    # Limpeza Final de Pastas
+    try:
+        if os.path.exists('temp_videos_groq'):
+            for f in os.listdir('temp_videos_groq'):
+                os.remove(os.path.join('temp_videos_groq', f))
+            os.rmdir('temp_videos_groq')
+    except:
+        pass
+
+    st.success("🏁 Todos os perfis analisados!")
