@@ -54,16 +54,24 @@ def conectar_sheets():
         return None
 
 def baixar_video_url(url, filename):
-    """Baixa o vídeo da URL fornecida pelo Apify"""
+    """Baixa o vídeo da URL fornecida pelo Apify com headers de navegador"""
     try:
-        response = requests.get(url, stream=True)
+        # Finge ser um navegador Chrome para o servidor não bloquear o download
+        headers = {
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+        }
+        
+        # Timeout para não travar se a net estiver lenta
+        response = requests.get(url, headers=headers, stream=True, timeout=20)
         response.raise_for_status()
+        
         with open(filename, 'wb') as f:
             for chunk in response.iter_content(chunk_size=8192):
                 f.write(chunk)
         return True
     except Exception as e:
-        print(f"Erro download: {e}")
+        # Mostra o erro no terminal do Streamlit para debug
+        print(f"❌ Erro download URL {url}: {e}")
         return False
 
 def analisar_video_com_gemini(video_path):
@@ -106,7 +114,7 @@ def analisar_video_com_gemini(video_path):
 def pegar_dados_apify(perfil, dias, container_log):
     """
     Substitui a lógica manual pela API profissional do Apify.
-    Usa o Actor: apify/instagram-scraper
+    Versão Corrigida: User Search + Tratamento de Legenda/Vídeo
     """
     if "apify_token" not in st.secrets:
         st.error("Token da Apify não configurado no secrets.toml")
@@ -115,14 +123,12 @@ def pegar_dados_apify(perfil, dias, container_log):
     client = ApifyClient(st.secrets["apify_token"])
     items_coletados = []
     
-    # --- AJUSTE FINAL ---
-    # searchType: "user" (Para passar na validação)
-    # directUrls: Link explícito (Para o robô não se perder na busca)
+    # Configuração correta que funcionou
     run_input = {
         "directUrls": [f"https://www.instagram.com/{perfil}/"],
         "resultsType": "posts",
         "resultsLimit": 30,
-        "searchType": "user",  # <--- MUDANÇA AQUI (Era 'url', agora é 'user')
+        "searchType": "user",
         "proxy": {
             "useApifyProxy": True,
             "apifyProxyGroups": ["RESIDENTIAL"] 
@@ -132,14 +138,12 @@ def pegar_dados_apify(perfil, dias, container_log):
     container_log.info(f"📡 Conectando Apify em: https://www.instagram.com/{perfil}/ ...")
 
     try:
-        # Executa o robô
         run = client.actor("apify/instagram-scraper").call(run_input=run_input)
         
         if not run:
             st.error("Erro: O Apify não retornou execução.")
             return []
 
-        # Pega os resultados
         dataset_items = client.dataset(run["defaultDatasetId"]).list_items().items
         
         container_log.info(f"📦 Apify retornou {len(dataset_items)} itens. Filtrando...")
@@ -147,13 +151,15 @@ def pegar_dados_apify(perfil, dias, container_log):
         data_limite = datetime.now(timezone.utc) - timedelta(days=dias)
         
         for item in dataset_items:
-            # Filtra apenas Vídeos/Reels
-            tipo = item.get('type')
-            # O Apify as vezes retorna 'GraphVideo', 'GraphSidecar', 'Video'
-            if tipo not in ['Video', 'Reel', 'Sidecar', 'GraphVideo', 'GraphSidecar']: 
-                continue
+            # --- 1. Filtro de Tipo ---
+            tipo = item.get('type', '')
+            # Aceita 'Video', 'Reel', e também casos onde 'is_video' é true
+            if tipo not in ['Video', 'Reel', 'Sidecar', 'GraphVideo', 'GraphSidecar']:
+                # Checagem extra caso o tipo venha diferente
+                if not item.get('is_video', False):
+                    continue
                 
-            # Tratamento de data
+            # --- 2. Tratamento de Data ---
             ts_str = item.get('timestamp')
             if not ts_str: continue
             
@@ -168,32 +174,42 @@ def pegar_dados_apify(perfil, dias, container_log):
             if data_post < data_limite:
                 continue
 
-            # Tenta achar a URL do vídeo
+            # --- 3. Busca Robusta da URL do Vídeo ---
             video_url = item.get('videoUrl')
             
-            # Lógica para Carrossel (Sidecar)
-            if not video_url and 'Sidecar' in str(tipo):
-                 children = item.get('childPosts', []) or item.get('children', [])
+            # Se for Carrossel ou se videoUrl veio vazio, tenta achar nos filhos
+            if not video_url:
+                 # Tenta diferentes nomes que o Apify usa para "filhos"
+                 children = item.get('childPosts') or item.get('children') or item.get('images') or []
                  if children:
                      for child in children:
-                         if child.get('type') == 'Video' or child.get('is_video'):
+                         # Procura o primeiro filho que seja vídeo
+                         if (child.get('type') == 'Video' or child.get('is_video')) and child.get('videoUrl'):
                              video_url = child.get('videoUrl')
                              break
 
-            # Se depois de tudo não tiver videoUrl, pula
+            # Se mesmo assim não achou, pula
             if not video_url: continue
 
-            # Padroniza os dados
-            legenda = item.get('caption') or item.get('description') or ""
+            # --- 4. Tratamento Robusto da Legenda ---
+            # Garante que seja string, mesmo se vier None
+            legenda_raw = item.get('caption') or item.get('description') or ""
+            if legenda_raw is None: legenda_raw = ""
             
+            # --- 5. Extração de Métricas (Evita erros de None) ---
+            views = item.get('videoViewCount') or item.get('playCount') or item.get('viewCount') or 0
+            likes = item.get('likesCount') or item.get('likes') or 0
+            comments = item.get('commentsCount') or item.get('comments') or 0
+            
+            # Monta o objeto final
             items_coletados.append({
                 "pk": item.get('id'),
                 "data_str": data_post.strftime("%d/%m/%Y"),
-                "views": item.get('videoViewCount', 0) or item.get('playCount', 0) or item.get('viewCount', 0),
-                "likes": item.get('likesCount', 0),
-                "comments": item.get('commentsCount', 0),
+                "views": int(views),
+                "likes": int(likes),
+                "comments": int(comments),
                 "link": f"https://www.instagram.com/p/{item.get('shortCode')}/",
-                "caption": legenda[:300] + "...",
+                "caption": str(legenda_raw)[:300] + "...", # Força string e corta
                 "download_url": video_url
             })
             
