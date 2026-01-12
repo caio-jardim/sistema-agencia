@@ -25,7 +25,7 @@ def check_password():
             return True
 
     # Se não, mostra o campo de senha
-    st.markdown("### 🔒 Acesso Restrito - Equipe Agência")
+    st.markdown("### 🔒 Acesso Restrito - Equipe E21")
     st.text_input(
         "Digite a senha de acesso:", 
         type="password", 
@@ -46,7 +46,7 @@ if not check_password():
 
 
 # Título Principal
-st.title("🚀 Agência Marketing OS")
+st.title("🚀 Equipe E21 Studio")
 st.markdown("### Bem-vindo ao Sistema Central de Automação")
 st.markdown("---")
 
@@ -61,7 +61,6 @@ with col1:
     1.  **Gerador de Roteiros:** Cria scripts virais baseados em "modelagem".
     2.  **Instagram Insights:** Análise básica de métricas e Top Posts.
     3.  **Análise Profunda (Groq):** Transcrição completa e análise de retenção.
-    4.  **Visão Computacional (Gemini):** Análise de elementos visuais e legendas.
     """)
 
 with col2:
@@ -69,10 +68,11 @@ with col2:
     st.markdown("""
     **Novidades v1.0:**
     * Integração com Google Sheets ✅
-    * IA Llama 3 e Gemini 2.0 ✅
+    * IA Llama 3 ✅
     * Login seguro do Instagram ✅
+    * Autenticação simples
     """)
 
 # Rodapé
 st.markdown("---")
-st.caption("Desenvolvido por Caio Jardim | Uso Interno da Agência")
+st.caption("Uso Interno da Agência")

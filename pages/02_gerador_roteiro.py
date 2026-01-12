@@ -27,7 +27,7 @@ def check_password():
             return True
 
     # Se não, mostra o campo de senha
-    st.markdown("### 🔒 Acesso Restrito - Equipe Agência")
+    st.markdown("### 🔒 Acesso Restrito - Equipe E21")
     st.text_input(
         "Digite a senha de acesso:", 
         type="password", 
