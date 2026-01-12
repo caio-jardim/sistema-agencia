@@ -16,23 +16,20 @@ st.set_page_config(page_title="Viral Analyzer (Apify + Groq)", page_icon="⚡")
 st.title("⚡ Viral Analyzer: Apify + Groq Whisper")
 st.markdown("---")
 
-# --- SISTEMA DE LOGIN (Copie e cole logo após os imports) ---
+# --- SISTEMA DE LOGIN ---
 def check_password():
     """Retorna True se o usuário tiver a senha correta."""
     def password_entered():
-        """Checa se a senha inserida bate com a dos segredos."""
         if st.session_state["password"] == st.secrets["general"]["team_password"]:
             st.session_state["password_correct"] = True
-            del st.session_state["password"]  # Não manter a senha na memória
+            del st.session_state["password"]
         else:
             st.session_state["password_correct"] = False
 
-    # Se a senha já foi validada, retorna True
     if "password_correct" in st.session_state:
         if st.session_state["password_correct"]:
             return True
 
-    # Se não, mostra o campo de senha
     st.markdown("### 🔒 Acesso Restrito - Equipe E21")
     st.text_input(
         "Digite a senha de acesso:", 
@@ -47,8 +44,6 @@ def check_password():
             
     return False
 
-# BLOQUEIO DE SEGURANÇA
-# Se a senha não for verificada, o script para de rodar aqui.
 if not check_password():
     st.stop()
 
@@ -63,7 +58,7 @@ with st.sidebar:
     TOP_VIDEOS = st.number_input("Top Vídeos para salvar", min_value=1, value=5)
     TOP_ANALISE_IA = st.number_input("Analisar com IA (Top X)", min_value=0, value=1)
     
-    st.success("✅ Infraestrutura: Apify (Nuvem)\n✅ Inteligência: Groq (Whisper + Llama)")
+    st.success("✅ Cache Inteligente Ativo: Evita re-gastar créditos em vídeos já analisados.")
 
 # --- FUNÇÕES ---
 
@@ -74,16 +69,13 @@ def conectar_sheets():
         creds = ServiceAccountCredentials.from_json_keyfile_dict(creds_dict, scope)
         client = gspread.authorize(creds)
         
-        nome_planilha = "Conteudo" # Nome do ARQUIVO
-        nome_aba = "1M1D"          # Nome da ABA
+        nome_planilha = "Conteudo"
+        nome_aba = "1M1D"
         
         sh = client.open(nome_planilha)
-        
         try:
-            # Tenta abrir a aba específica que você criou
             sheet = sh.worksheet(nome_aba)
         except:
-            # Se não achar, avisa ou pega a primeira
             st.warning(f"Aba '{nome_aba}' não encontrada. Usando a primeira aba.")
             sheet = sh.sheet1
             
@@ -92,12 +84,31 @@ def conectar_sheets():
         st.error(f"Erro ao conectar no Google Sheets: {e}")
         return None
 
+def carregar_historico_links(sheet):
+    """
+    Lê a planilha inteira e cria um dicionário para verificação rápida.
+    Retorna: {'https://instagram...': {'transcricao': '...', 'gancho': '...'}, ...}
+    """
+    try:
+        st.toast("Lendo histórico da planilha...", icon="📂")
+        records = sheet.get_all_records()
+        historico = {}
+        for row in records:
+            link = row.get('Link')
+            if link:
+                historico[link] = {
+                    'transcricao': row.get('Transcrição (Whisper)', ''),
+                    'ganchos_verbais': row.get('Gancho Verbal (IA)', '')
+                }
+        return historico
+    except Exception as e:
+        print(f"Erro ao ler histórico (pode ser planilha vazia): {e}")
+        return {}
+
 def baixar_video_with_retry(url, filename, retries=3):
-    """Baixa vídeo com tentativas em caso de erro de DNS/Rede"""
     headers = {
         "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
     }
-    
     for i in range(retries):
         try:
             response = requests.get(url, headers=headers, stream=True, timeout=30)
@@ -108,35 +119,25 @@ def baixar_video_with_retry(url, filename, retries=3):
             return True
         except Exception as e:
             if i < retries - 1:
-                time.sleep(2) # Espera 2 segundos antes de tentar de novo
+                time.sleep(2)
                 continue
             else:
-                print(f"❌ Erro download final após {retries} tentativas: {e}")
+                print(f"❌ Erro download final: {e}")
                 return False
 
 def analisar_video_groq(video_path, status_box):
-    """
-    Extrai áudio e usa Whisper + Llama 3 via Groq
-    """
     client_groq = Groq(api_key=st.secrets["groq_api_key"])
     audio_path = video_path.replace(".mp4", ".mp3")
 
     try:
-        # 1. Extração de Áudio
         status_box.write("🔊 Extraindo áudio...")
         try:
             video_clip = VideoFileClip(video_path)
-            video_clip.audio.write_audiofile(
-                audio_path, 
-                bitrate="32k", 
-                verbose=False, 
-                logger=None
-            )
+            video_clip.audio.write_audiofile(audio_path, bitrate="32k", verbose=False, logger=None)
             video_clip.close()
         except Exception as e:
             return {"transcricao": f"Erro MoviePy: {e}", "ganchos_verbais": "-"}
 
-        # 2. Transcrição (Whisper)
         status_box.write("📝 Transcrevendo (Whisper)...")
         with open(audio_path, "rb") as file:
             transcription = client_groq.audio.transcriptions.create(
@@ -146,7 +147,6 @@ def analisar_video_groq(video_path, status_box):
             )
         texto_transcrito = str(transcription)
 
-        # 3. Análise de Gancho (Llama 3)
         status_box.write("🧠 Analisando com Llama 3...")
         prompt = f"""
         Analise a transcrição deste vídeo curto:
@@ -189,7 +189,6 @@ def pegar_dados_apify(perfil, dias, container_log):
     client = ApifyClient(st.secrets["apify_token"])
     items_coletados = []
     
-    # Busca 30 posts (pode aumentar para 50 se quiser mais janela de tempo)
     run_input = {
         "directUrls": [f"https://www.instagram.com/{perfil}/"],
         "resultsType": "posts",
@@ -263,9 +262,12 @@ def pegar_dados_apify(perfil, dias, container_log):
 # --- BOTÃO PRINCIPAL ---
 if st.button("🚀 Iniciar Análise (Apify + Groq)", type="primary"):
     
-    # 1. Conecta Planilha (Agora busca aba 1M1D)
+    # 1. Conecta Planilha e Carrega Histórico (CACHE)
     sheet = conectar_sheets()
     if not sheet: st.stop()
+    
+    # MAPA DOS VÍDEOS JÁ ANALISADOS
+    historico_analises = carregar_historico_links(sheet)
 
     timestamp = datetime.now().strftime("%d/%m/%Y %H:%M")
     
@@ -291,29 +293,43 @@ if st.button("🚀 Iniciar Análise (Apify + Groq)", type="primary"):
         for i, v in enumerate(top_final):
             rank = i + 1
             ia_data = {"transcricao": "", "ganchos_verbais": ""}
+            link_atual = v['link']
             
-            # Se for vídeo Top, processa com IA
+            # Se for vídeo Top, decide se analisa ou recupera
             if rank <= TOP_ANALISE_IA:
-                with st.status(f"⭐ [Top {rank}] Analisando IA ({v['views']} views)...", expanded=True) as status:
+                
+                # --- VERIFICAÇÃO DE CACHE (ECONOMIA) ---
+                if link_atual in historico_analises:
+                    # Se já existe, copia os dados antigos
+                    st.toast(f"Top {rank}: Recuperado do Cache ♻️", icon="⚡")
+                    ia_data['transcricao'] = historico_analises[link_atual]['transcricao']
+                    ia_data['ganchos_verbais'] = historico_analises[link_atual]['ganchos_verbais']
                     
-                    caminho_video_temp = os.path.join('temp_videos_groq', f"{v['pk']}.mp4")
-                    
-                    # Tenta baixar (com retry automático)
-                    status.write("⬇️ Baixando arquivo...")
-                    sucesso_download = baixar_video_with_retry(v['download_url'], caminho_video_temp)
-                    
-                    if sucesso_download:
-                        ia_data = analisar_video_groq(caminho_video_temp, status)
+                    # Log visual para o usuário saber que foi rápido
+                    with st.status(f"♻️ [Top {rank}] Vídeo já analisado anteriormente!", expanded=False, state="complete") as status:
+                        status.write("Dados recuperados da planilha para economizar créditos.")
+                
+                else:
+                    # Se é novo, faz o processo completo (Download + Groq)
+                    with st.status(f"⭐ [Top {rank}] Processando Novo Vídeo ({v['views']} views)...", expanded=True) as status:
                         
-                        if os.path.exists(caminho_video_temp):
-                            os.remove(caminho_video_temp)
+                        caminho_video_temp = os.path.join('temp_videos_groq', f"{v['pk']}.mp4")
                         
-                        status.update(label="✅ Análise Groq Completa!", state="complete", expanded=False)
-                    else:
-                        status.update(label="❌ Falha no Download (Rede)", state="error")
-                        ia_data["transcricao"] = "Erro Download"
+                        status.write("⬇️ Baixando arquivo...")
+                        sucesso_download = baixar_video_with_retry(v['download_url'], caminho_video_temp)
+                        
+                        if sucesso_download:
+                            ia_data = analisar_video_groq(caminho_video_temp, status)
+                            
+                            if os.path.exists(caminho_video_temp):
+                                os.remove(caminho_video_temp)
+                            
+                            status.update(label="✅ Análise Groq Completa!", state="complete", expanded=False)
+                        else:
+                            status.update(label="❌ Falha no Download", state="error")
+                            ia_data["transcricao"] = "Erro Download"
 
-            # --- MELHORIA: Salva IMEDIATAMENTE no Sheets ---
+            # --- SALVA NO SHEETS ---
             nova_linha = [
                 timestamp, f"@{perfil}", f"{DIAS_ANALISE}d", f"{rank}º",
                 v['data_str'], v['views'], v['likes'], v['comments'], v['link'],
@@ -324,6 +340,11 @@ if st.button("🚀 Iniciar Análise (Apify + Groq)", type="primary"):
             
             try:
                 sheet.append_row(nova_linha)
+                # Atualiza o cache localmente para o próximo loop (opcional, mas boa prática)
+                historico_analises[link_atual] = {
+                    'transcricao': ia_data.get('transcricao', ''),
+                    'ganchos_verbais': ia_data.get('ganchos_verbais', '')
+                }
                 st.toast(f"Top {rank} de @{perfil} salvo!", icon="💾")
             except Exception as e:
                 st.error(f"Erro ao salvar linha no Excel: {e}")
