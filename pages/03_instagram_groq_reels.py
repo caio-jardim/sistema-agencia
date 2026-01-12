@@ -140,7 +140,7 @@ def analisar_video_groq(video_path, status_box):
 
 def pegar_dados_apify(perfil, dias, container_log):
     """
-    Busca dados via Apify (Sem login local)
+    Versão com DIAGNÓSTICO DETALHADO para entender por que não salvou.
     """
     if "apify_token" not in st.secrets:
         st.error("Token da Apify não configurado no secrets.toml")
@@ -152,7 +152,7 @@ def pegar_dados_apify(perfil, dias, container_log):
     run_input = {
         "directUrls": [f"https://www.instagram.com/{perfil}/"],
         "resultsType": "posts",
-        "resultsLimit": 30,
+        "resultsLimit": 30, # Pega os 30 últimos posts
         "searchType": "user",
         "proxy": {
             "useApifyProxy": True,
@@ -171,16 +171,31 @@ def pegar_dados_apify(perfil, dias, container_log):
 
         dataset_items = client.dataset(run["defaultDatasetId"]).list_items().items
         
-        container_log.info(f"📦 Apify retornou {len(dataset_items)} itens. Filtrando...")
+        # --- DIAGNÓSTICO INICIAL ---
+        total_itens = len(dataset_items)
+        container_log.info(f"📦 Apify retornou {total_itens} itens brutos.")
         
+        if total_itens == 0:
+            container_log.warning("⚠️ O perfil parece vazio ou privado, ou o Apify falhou em ler os posts.")
+            return []
+
         data_limite = datetime.now(timezone.utc) - timedelta(days=dias)
+        container_log.info(f"📅 Filtrando posts mais recentes que: {data_limite.strftime('%d/%m/%Y')}")
+        
+        # Contadores para entender o filtro
+        ignorados_tipo = 0
+        ignorados_data = 0
+        ignorados_url = 0
         
         for item in dataset_items:
-            # Filtros e tratamento de dados (Idêntico ao anterior que funcionou)
+            # --- 1. Filtro de Tipo ---
             tipo = item.get('type', '')
             if tipo not in ['Video', 'Reel', 'Sidecar', 'GraphVideo', 'GraphSidecar']:
-                if not item.get('is_video', False): continue
+                if not item.get('is_video', False):
+                    ignorados_tipo += 1
+                    continue
             
+            # --- 2. Tratamento de Data ---
             ts_str = item.get('timestamp')
             if not ts_str: continue
             
@@ -189,10 +204,14 @@ def pegar_dados_apify(perfil, dias, container_log):
                     data_post = datetime.strptime(ts_str, "%Y-%m-%dT%H:%M:%S.%fZ").replace(tzinfo=timezone.utc)
                 else:
                     data_post = datetime.strptime(ts_str, "%Y-%m-%dT%H:%M:%S").replace(tzinfo=timezone.utc)
-            except: continue 
+            except:
+                continue 
 
-            if data_post < data_limite: continue
+            if data_post < data_limite:
+                ignorados_data += 1
+                continue
 
+            # --- 3. Busca da URL ---
             video_url = item.get('videoUrl')
             if not video_url:
                  children = item.get('childPosts') or item.get('children') or item.get('images') or []
@@ -201,7 +220,10 @@ def pegar_dados_apify(perfil, dias, container_log):
                          if (child.get('type') == 'Video' or child.get('is_video')) and child.get('videoUrl'):
                              video_url = child.get('videoUrl')
                              break
-            if not video_url: continue
+            
+            if not video_url: 
+                ignorados_url += 1
+                continue
 
             legenda_raw = item.get('caption') or item.get('description') or ""
             if legenda_raw is None: legenda_raw = ""
@@ -219,6 +241,16 @@ def pegar_dados_apify(perfil, dias, container_log):
                 "download_url": video_url
             })
             
+        # --- RELATÓRIO FINAL DO FILTRO ---
+        container_log.write(f"""
+        📊 **Relatório de Filtragem:**
+        - Total Baixado: {total_itens}
+        - ❌ Ignorados (Não são vídeos): {ignorados_tipo}
+        - ❌ Ignorados (Antigos demais): {ignorados_data}
+        - ❌ Ignorados (Sem link vídeo): {ignorados_url}
+        - ✅ **Aprovados:** {len(items_coletados)}
+        """)
+
     except Exception as e:
         st.error(f"Erro na Apify: {e}")
         return []
