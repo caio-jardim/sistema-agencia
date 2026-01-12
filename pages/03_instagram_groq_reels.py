@@ -38,51 +38,56 @@ def conectar_sheets():
         creds = ServiceAccountCredentials.from_json_keyfile_dict(creds_dict, scope)
         client = gspread.authorize(creds)
         
-        nome_planilha = "Conteudo"
+        nome_planilha = "Conteudo" # Nome do ARQUIVO
+        nome_aba = "1M1D"          # Nome da ABA
+        
+        sh = client.open(nome_planilha)
+        
         try:
-            sheet = client.open(nome_planilha).sheet1
+            # Tenta abrir a aba específica que você criou
+            sheet = sh.worksheet(nome_aba)
         except:
-            sh = client.create(nome_planilha)
+            # Se não achar, avisa ou pega a primeira
+            st.warning(f"Aba '{nome_aba}' não encontrada. Usando a primeira aba.")
             sheet = sh.sheet1
-            # Cabeçalho adaptado para a saída da Groq
-            sheet.append_row([
-                "Data Coleta", "Perfil", "Janela", "Rank", "Data Post", 
-                "Views (Play)", "Likes", "Comentários", "Link", "Legenda Original",
-                "Transcrição (Whisper)", "Gancho Verbal (IA)"
-            ])
+            
         return sheet
     except Exception as e:
-        st.error(f"Erro Sheets: {e}")
+        st.error(f"Erro ao conectar no Google Sheets: {e}")
         return None
 
-def baixar_video_url(url, filename):
-    """Baixa o vídeo da URL fornecida pelo Apify com headers de navegador"""
-    try:
-        headers = {
-            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
-        }
-        response = requests.get(url, headers=headers, stream=True, timeout=30)
-        response.raise_for_status()
-        with open(filename, 'wb') as f:
-            for chunk in response.iter_content(chunk_size=8192):
-                f.write(chunk)
-        return True
-    except Exception as e:
-        print(f"❌ Erro download URL {url}: {e}")
-        return False
+def baixar_video_with_retry(url, filename, retries=3):
+    """Baixa vídeo com tentativas em caso de erro de DNS/Rede"""
+    headers = {
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+    }
+    
+    for i in range(retries):
+        try:
+            response = requests.get(url, headers=headers, stream=True, timeout=30)
+            response.raise_for_status()
+            with open(filename, 'wb') as f:
+                for chunk in response.iter_content(chunk_size=8192):
+                    f.write(chunk)
+            return True
+        except Exception as e:
+            if i < retries - 1:
+                time.sleep(2) # Espera 2 segundos antes de tentar de novo
+                continue
+            else:
+                print(f"❌ Erro download final após {retries} tentativas: {e}")
+                return False
 
 def analisar_video_groq(video_path, status_box):
     """
     Extrai áudio e usa Whisper + Llama 3 via Groq
     """
     client_groq = Groq(api_key=st.secrets["groq_api_key"])
-    
-    # Define caminho do audio temporário
     audio_path = video_path.replace(".mp4", ".mp3")
 
     try:
         # 1. Extração de Áudio
-        status_box.write("🔊 Extraindo áudio (MoviePy)...")
+        status_box.write("🔊 Extraindo áudio...")
         try:
             video_clip = VideoFileClip(video_path)
             video_clip.audio.write_audiofile(
@@ -96,7 +101,7 @@ def analisar_video_groq(video_path, status_box):
             return {"transcricao": f"Erro MoviePy: {e}", "ganchos_verbais": "-"}
 
         # 2. Transcrição (Whisper)
-        status_box.write("📝 Transcrevendo com Whisper Large v3...")
+        status_box.write("📝 Transcrevendo (Whisper)...")
         with open(audio_path, "rb") as file:
             transcription = client_groq.audio.transcriptions.create(
                 file=(audio_path, file.read()),
@@ -106,13 +111,16 @@ def analisar_video_groq(video_path, status_box):
         texto_transcrito = str(transcription)
 
         # 3. Análise de Gancho (Llama 3)
-        status_box.write("🧠 Identificando Gancho com Llama 3...")
+        status_box.write("🧠 Analisando com Llama 3...")
         prompt = f"""
-        Abaixo está o começo da transcrição de um vídeo:
+        Analise a transcrição deste vídeo curto:
         "{texto_transcrito[:4000]}"
 
-        Tarefa: Identifique a frase exata usada no início (gancho) para prender a atenção.
-        Retorne APENAS um JSON: {{ "ganchos_verbais": "A frase do gancho aqui" }}
+        Identifique:
+        1. O Gancho Verbal (Frase exata do início).
+        2. O Gancho Visual (O que descreve a cena inicial, se houver pistas no texto, senão deixe vazio).
+        
+        Retorne JSON: {{ "ganchos_verbais": "...", "ganchos_visuais": "..." }}
         """
         
         completion = client_groq.chat.completions.create(
@@ -124,13 +132,12 @@ def analisar_video_groq(video_path, status_box):
 
         resultado_ia = json.loads(completion.choices[0].message.content)
 
-        # Limpeza do áudio (o vídeo será limpo no loop principal)
-        if os.path.exists(audio_path): 
-            os.remove(audio_path)
+        if os.path.exists(audio_path): os.remove(audio_path)
 
         return {
             "transcricao": texto_transcrito,
-            "ganchos_verbais": resultado_ia.get("ganchos_verbais", "-")
+            "ganchos_verbais": resultado_ia.get("ganchos_verbais", "-"),
+            "ganchos_visuais": resultado_ia.get("ganchos_visuais", "-")
         }
 
     except Exception as e:
@@ -139,20 +146,18 @@ def analisar_video_groq(video_path, status_box):
         return {"transcricao": "Erro API", "ganchos_verbais": "-"}
 
 def pegar_dados_apify(perfil, dias, container_log):
-    """
-    Versão com DIAGNÓSTICO DETALHADO para entender por que não salvou.
-    """
     if "apify_token" not in st.secrets:
-        st.error("Token da Apify não configurado no secrets.toml")
+        st.error("Token da Apify não configurado.")
         return []
 
     client = ApifyClient(st.secrets["apify_token"])
     items_coletados = []
     
+    # Busca 30 posts (pode aumentar para 50 se quiser mais janela de tempo)
     run_input = {
         "directUrls": [f"https://www.instagram.com/{perfil}/"],
         "resultsType": "posts",
-        "resultsLimit": 30, # Pega os 30 últimos posts
+        "resultsLimit": 30, 
         "searchType": "user",
         "proxy": {
             "useApifyProxy": True,
@@ -160,42 +165,22 @@ def pegar_dados_apify(perfil, dias, container_log):
         }
     }
 
-    container_log.info(f"📡 Conectando Apify em: https://www.instagram.com/{perfil}/ ...")
+    container_log.info(f"📡 Apify: Lendo @{perfil}...")
 
     try:
         run = client.actor("apify/instagram-scraper").call(run_input=run_input)
-        
-        if not run:
-            st.error("Erro: O Apify não retornou execução.")
-            return []
+        if not run: return []
 
         dataset_items = client.dataset(run["defaultDatasetId"]).list_items().items
+        container_log.info(f"📦 {len(dataset_items)} itens encontrados. Filtrando...")
         
-        # --- DIAGNÓSTICO INICIAL ---
-        total_itens = len(dataset_items)
-        container_log.info(f"📦 Apify retornou {total_itens} itens brutos.")
-        
-        if total_itens == 0:
-            container_log.warning("⚠️ O perfil parece vazio ou privado, ou o Apify falhou em ler os posts.")
-            return []
-
         data_limite = datetime.now(timezone.utc) - timedelta(days=dias)
-        container_log.info(f"📅 Filtrando posts mais recentes que: {data_limite.strftime('%d/%m/%Y')}")
-        
-        # Contadores para entender o filtro
-        ignorados_tipo = 0
-        ignorados_data = 0
-        ignorados_url = 0
         
         for item in dataset_items:
-            # --- 1. Filtro de Tipo ---
             tipo = item.get('type', '')
-            if tipo not in ['Video', 'Reel', 'Sidecar', 'GraphVideo', 'GraphSidecar']:
-                if not item.get('is_video', False):
-                    ignorados_tipo += 1
-                    continue
+            if tipo not in ['Video', 'Reel', 'Sidecar', 'GraphVideo'] and not item.get('is_video', False):
+                continue
             
-            # --- 2. Tratamento de Data ---
             ts_str = item.get('timestamp')
             if not ts_str: continue
             
@@ -204,26 +189,18 @@ def pegar_dados_apify(perfil, dias, container_log):
                     data_post = datetime.strptime(ts_str, "%Y-%m-%dT%H:%M:%S.%fZ").replace(tzinfo=timezone.utc)
                 else:
                     data_post = datetime.strptime(ts_str, "%Y-%m-%dT%H:%M:%S").replace(tzinfo=timezone.utc)
-            except:
-                continue 
+            except: continue 
 
-            if data_post < data_limite:
-                ignorados_data += 1
-                continue
+            if data_post < data_limite: continue
 
-            # --- 3. Busca da URL ---
             video_url = item.get('videoUrl')
             if not video_url:
-                 children = item.get('childPosts') or item.get('children') or item.get('images') or []
-                 if children:
-                     for child in children:
-                         if (child.get('type') == 'Video' or child.get('is_video')) and child.get('videoUrl'):
-                             video_url = child.get('videoUrl')
-                             break
-            
-            if not video_url: 
-                ignorados_url += 1
-                continue
+                 children = item.get('childPosts') or item.get('children') or []
+                 for child in children:
+                     if (child.get('type') == 'Video' or child.get('is_video')) and child.get('videoUrl'):
+                         video_url = child.get('videoUrl')
+                         break
+            if not video_url: continue
 
             legenda_raw = item.get('caption') or item.get('description') or ""
             if legenda_raw is None: legenda_raw = ""
@@ -241,16 +218,6 @@ def pegar_dados_apify(perfil, dias, container_log):
                 "download_url": video_url
             })
             
-        # --- RELATÓRIO FINAL DO FILTRO ---
-        container_log.write(f"""
-        📊 **Relatório de Filtragem:**
-        - Total Baixado: {total_itens}
-        - ❌ Ignorados (Não são vídeos): {ignorados_tipo}
-        - ❌ Ignorados (Antigos demais): {ignorados_data}
-        - ❌ Ignorados (Sem link vídeo): {ignorados_url}
-        - ✅ **Aprovados:** {len(items_coletados)}
-        """)
-
     except Exception as e:
         st.error(f"Erro na Apify: {e}")
         return []
@@ -260,6 +227,7 @@ def pegar_dados_apify(perfil, dias, container_log):
 # --- BOTÃO PRINCIPAL ---
 if st.button("🚀 Iniciar Análise (Apify + Groq)", type="primary"):
     
+    # 1. Conecta Planilha (Agora busca aba 1M1D)
     sheet = conectar_sheets()
     if not sheet: st.stop()
 
@@ -282,49 +250,53 @@ if st.button("🚀 Iniciar Análise (Apify + Groq)", type="primary"):
         top_final = sorted(videos, key=lambda x: x['views'], reverse=True)[:TOP_VIDEOS]
         st.write(f"🏆 Top {len(top_final)} vídeos identificados.")
         
-        rows = []
         barra = st.progress(0)
         
         for i, v in enumerate(top_final):
             rank = i + 1
             ia_data = {"transcricao": "", "ganchos_verbais": ""}
             
+            # Se for vídeo Top, processa com IA
             if rank <= TOP_ANALISE_IA:
-                # Container de Status Expandido
-                with st.status(f"⭐ [Top {rank}] Processando Vídeo ({v['views']} views)...", expanded=True) as status:
+                with st.status(f"⭐ [Top {rank}] Analisando IA ({v['views']} views)...", expanded=True) as status:
                     
                     caminho_video_temp = os.path.join('temp_videos_groq', f"{v['pk']}.mp4")
                     
-                    # 1. Baixar
+                    # Tenta baixar (com retry automático)
                     status.write("⬇️ Baixando arquivo...")
-                    sucesso_download = baixar_video_url(v['download_url'], caminho_video_temp)
+                    sucesso_download = baixar_video_with_retry(v['download_url'], caminho_video_temp)
                     
                     if sucesso_download:
-                        # 2. Analisar com Groq
                         ia_data = analisar_video_groq(caminho_video_temp, status)
                         
-                        # Limpa vídeo
                         if os.path.exists(caminho_video_temp):
                             os.remove(caminho_video_temp)
                         
                         status.update(label="✅ Análise Groq Completa!", state="complete", expanded=False)
                     else:
-                        status.update(label="❌ Falha no Download", state="error")
+                        status.update(label="❌ Falha no Download (Rede)", state="error")
+                        ia_data["transcricao"] = "Erro Download"
 
-            rows.append([
+            # --- MELHORIA: Salva IMEDIATAMENTE no Sheets ---
+            nova_linha = [
                 timestamp, f"@{perfil}", f"{DIAS_ANALISE}d", f"{rank}º",
                 v['data_str'], v['views'], v['likes'], v['comments'], v['link'],
                 v['caption'],
                 ia_data.get('transcricao', ''),
                 ia_data.get('ganchos_verbais', '')
-            ])
+            ]
             
-            barra.progress((i + 1) / len(top_final))
+            try:
+                sheet.append_row(nova_linha)
+                st.toast(f"Top {rank} de @{perfil} salvo!", icon="💾")
+            except Exception as e:
+                st.error(f"Erro ao salvar linha no Excel: {e}")
 
-        sheet.append_rows(rows)
-        st.toast(f"@{perfil} Salvo!", icon="💾")
-        time.sleep(2)
-    
+            barra.progress((i + 1) / len(top_final))
+        
+        time.sleep(1)
+
+    # Limpeza Final
     try:
         if os.path.exists('temp_videos_groq'):
             for f in os.listdir('temp_videos_groq'):
@@ -333,4 +305,4 @@ if st.button("🚀 Iniciar Análise (Apify + Groq)", type="primary"):
     except: pass
 
     st.balloons()
-    st.success("🏁 Análise Finalizada com Sucesso!")
+    st.success("🏁 Análise Finalizada!")
