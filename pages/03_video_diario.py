@@ -5,10 +5,10 @@ from groq import Groq
 from duckduckgo_search import DDGS
 
 # --- CONFIGURAÇÃO DA PÁGINA ---
-st.set_page_config(page_title="Caçador de Notícias Virais", page_icon="🦈")
+st.set_page_config(page_title="Gerador Viral (Bridge Technique)", page_icon="🌉")
 
-st.title("🦈 Caçador de Notícias Virais")
-st.markdown("Dê o seu nicho e a IA varre a internet buscando polêmicas úteis para você.")
+st.title("🌉 Gerador Viral: Técnica da Ponte")
+st.markdown("Conecte assuntos do momento (Trends) ao seu produto, mesmo que não tenham nada a ver.")
 st.markdown("---")
 
 # --- SISTEMA DE LOGIN ---
@@ -37,178 +37,153 @@ if not check_password():
 
 # --- SIDEBAR: INPUTS ---
 with st.sidebar:
-    st.header("⚙️ Configuração do Caçador")
+    st.header("⚙️ Configuração")
     
-    nicho_atuacao = st.text_input("Qual seu Nicho/Produto?", "Holding Familiar e Proteção Patrimonial")
+    nicho_atuacao = st.text_input("Seu Nicho", "Holding Familiar")
     
     publico_alvo = st.text_area(
-        "Quem é o público alvo?", 
-        "Empresários e famílias ricas que têm medo de perder dinheiro para o governo ou briga de filhos."
+        "Público Alvo", 
+        "Empresários com patrimônio que temem instabilidade política e impostos."
     )
     
-    tom_voz = st.selectbox("Tom do Vídeo", ["Polêmico/Alerta", "Educativo/Técnico", "Indignado"], index=0)
+    # Adicionamos busca de Trends Gerais
+    st.markdown("---")
+    st.markdown("**🔍 Estratégia de Busca**")
+    buscar_trends = st.checkbox("Buscar Notícias Gerais (Política/Pop/Mundo)?", value=True)
+    buscar_nicho = st.checkbox("Buscar Notícias do Nicho?", value=True)
     
-    dias_atras = st.selectbox("Janela de Busca:", ["Últimas 24h", "Últimos 3 dias", "Última Semana"], index=1)
-    
-    mapa_dias = {"Últimas 24h": "d", "Últimos 3 dias": "d3", "Última Semana": "w"}
+    dias_atras = st.selectbox("Janela de Tempo:", ["Últimas 24h", "Últimos 3 dias"], index=1)
+    mapa_dias = {"Últimas 24h": "d", "Últimos 3 dias": "d3"}
     timelimit = mapa_dias[dias_atras]
 
-# --- FUNÇÕES INTELIGENTES ---
+# --- FUNÇÕES ---
 
-def gerar_termos_de_busca(nicho, publico):
-    """
-    Usa a IA para 'adivinhar' o que devemos pesquisar no Google News
-    para achar ouro para esse nicho.
-    """
-    client = Groq(api_key=st.secrets["groq_api_key"])
-    
-    prompt = f"""
-    Aja como um estrategista de conteúdo viral.
-    Meu Nicho: "{nicho}"
-    Meu Público: "{publico}"
-    
-    Sua missão: Liste 3 termos de busca curtos e específicos para encontrar notícias RECENTES que afetam esse público e geram medo, ganância ou curiosidade.
-    Pense em: Leis novas, escândalos, mudanças econômicas, polêmicas atuais.
-    
-    Exemplo para Holding: "Reforma Tributária herança", "Aumento ITCMD", "Briga herança famosos".
-    
-    Retorne APENAS um JSON puro (sem markdown) no formato:
-    {{ "termos": ["termo 1", "termo 2", "termo 3"] }}
-    """
-    
-    try:
-        completion = client.chat.completions.create(
-            model="llama-3.3-70b-versatile",
-            messages=[{"role": "user", "content": prompt}],
-            temperature=0.5,
-            response_format={"type": "json_object"}
-        )
-        return json.loads(completion.choices[0].message.content).get("termos", [])
-    except Exception as e:
-        st.error(f"Erro ao gerar termos: {e}")
-        return [nicho] # Fallback
-
-def buscar_noticias_reais(lista_termos, tempo, log_container):
-    """Varre o DuckDuckGo com os termos sugeridos pela IA"""
+def buscar_noticias(termos, tempo, log_container):
+    """Varre o DuckDuckGo"""
     todas_noticias = []
     links_vistos = set()
     
     with DDGS() as ddgs:
-        for termo in lista_termos:
-            log_container.write(f"🔎 Pesquisando sobre: *'{termo}'*...")
+        for termo in termos:
+            log_container.write(f"🔎 Pesquisando: *'{termo}'*...")
             try:
+                # Max results 2 por termo para não poluir demais
                 results = ddgs.news(
                     keywords=termo, 
                     region="br-pt", 
                     safesearch="off", 
                     timelimit=tempo, 
-                    max_results=3 # Pega top 3 de cada termo
+                    max_results=2 
                 )
                 
                 for news in results:
-                    # Evita duplicatas
                     if news['url'] not in links_vistos:
+                        # Adiciona tag para saber a origem
+                        news['termo_origem'] = termo
                         todas_noticias.append(news)
                         links_vistos.add(news['url'])
                         
             except Exception as e:
                 print(f"Erro buscando {termo}: {e}")
-            
-            time.sleep(0.5) # Respeita o servidor
+            time.sleep(0.3)
             
     return todas_noticias
 
-def selecionar_e_roteirizar(noticias, nicho, publico, tom):
+def selecionar_e_roteirizar_bridge(noticias, nicho, publico):
     """
-    A IA lê as notícias encontradas e escolhe a melhor.
+    A MÁGICA: Usa a IA para fazer a 'Ponte' entre assunto aleatório e o nicho.
     """
     client = Groq(api_key=st.secrets["groq_api_key"])
     
-    # Prepara o texto para a IA ler
+    # Prepara o feed
     feed_noticias = ""
     for i, n in enumerate(noticias):
-        feed_noticias += f"[{i+1}] MANCHETE: {n['title']} | FONTE: {n['source']} | DATA: {n['date']}\nRESUMO: {n['body']}\nLINK: {n['url']}\n\n"
+        feed_noticias += f"[{i+1}] MANCHETE: {n['title']} (Busca: {n['termo_origem']})\nRESUMO: {n['body']}\n\n"
 
     prompt = f"""
-    Você é um roteirista de vídeos virais sensacionalistas (mas verdadeiros).
+    Você é um gênio do Marketing Viral e Pensamento Lateral.
     
-    CONTEXTO:
-    Nicho: {nicho}
-    Público: {publico}
-    Tom de Voz: {tom}
+    MEU NICHO: {nicho}
+    MEU PÚBLICO: {publico}
     
-    Abaixo estão notícias reais que acabamos de coletar na internet:
-    -----------------------------------
+    NOTÍCIAS RECENTES ENCONTRADAS:
     {feed_noticias}
-    -----------------------------------
     
-    SUA TAREFA:
-    1. Escolha a notícia mais "bomba", urgente ou polêmica dessa lista. Aquela que fará o cliente parar de rolar o feed.
-    2. Ignore notícias irrelevantes ou muito antigas se houver opções melhores.
-    3. Escreva um Roteiro de Vídeo (Reels/TikTok).
+    SUA MISSÃO:
+    1. Escolha a notícia mais "Mainstream" (famosa/polêmica) da lista, mesmo que NÃO tenha nada a ver com o nicho. (Ex: Prisão de político, BBB, Famosos, Guerra).
+    2. Crie uma "PONTE LÓGICA" (Bridge) entre essa notícia e o meu produto.
     
-    ESTRUTURA OBRIGATÓRIA:
-    - NOTÍCIA ESCOLHIDA: (Cite qual título você escolheu)
-    - HEADLINE (Texto na tela): Algo curto e chocante.
-    - GANCHO (0-5s): Comece com a notícia bomba. Use gatilhos de medo ou urgência.
-    - CORPO: Explique a notícia rapidamente e conecte com o problema do cliente.
-    - VIRADA (Venda): Explique como o {nicho} salva ele disso.
-    - CTA: Mande comentar ou clicar no link.
+    EXEMPLOS DE PONTE (Raciocínio):
+    - Notícia: "Maduro Preso/Caiu" -> Ponte: "Instabilidade política derruba governos. E se derrubarem seu patrimônio? Holding protege."
+    - Notícia: "Larissa Manoela briga com pais" -> Ponte: "Briga familiar destrói fortunas. Holding evita briga."
+    - Notícia: "Imposto aumenta na China" -> Ponte: "O governo sempre quer mais. Proteja-se aqui."
     
-    Use formatação Markdown bonita.
+    AGORA ESCREVA O ROTEIRO (Reels 60s):
+    - GANCHO (0-3s): Use a notícia bomba. "Você viu que o [Fulano] foi preso/caiu?"
+    - A PONTE (3-15s): Faça a transição. "O que isso tem a ver com o seu dinheiro? TUDO."
+    - A LIÇÃO (15-45s): Explique o risco e a solução ({nicho}).
+    - CTA (45-60s): Chamada para ação.
+    
+    Retorne em Markdown. Explique qual foi a "Lógica da Ponte" usada no início.
     """
     
     completion = client.chat.completions.create(
         model="llama-3.3-70b-versatile",
         messages=[{"role": "user", "content": prompt}],
-        temperature=0.7
+        temperature=0.8 # Criatividade alta para fazer conexões inusitadas
     )
     
     return completion.choices[0].message.content
 
 # --- INTERFACE PRINCIPAL ---
 
-if st.button("🦈 Iniciar Caçada Viral", type="primary"):
+if st.button("🌉 Gerar Roteiro com Ponte Viral", type="primary"):
     
-    status_box = st.status("🧠 IA Iniciando estratégia...", expanded=True)
+    status_box = st.status("🧠 Iniciando varredura...", expanded=True)
     
-    # 1. Brainstorming
-    status_box.write("🤔 Definindo o que pesquisar...")
-    termos = gerar_termos_de_busca(nicho_atuacao, publico_alvo)
+    termos_busca = []
     
-    if not termos:
-        status_box.update(label="❌ Erro ao gerar termos.", state="error")
-        st.stop()
+    # 1. Define termos de busca
+    if buscar_nicho:
+        termos_busca.extend([f"Polêmica {nicho_atuacao}", f"Lei {nicho_atuacao}", "Impostos Brasil"])
         
-    status_box.write(f"🎯 Termos definidos: {', '.join(termos)}")
+    if buscar_trends:
+        # Termos genéricos para pegar o hype do dia
+        termos_busca.extend([
+            "Notícias mais lidas hoje Brasil",
+            "Escândalo política hoje",
+            "Polêmica famosos Brasil",
+            "Prisão urgente hoje",
+            "O que está acontecendo no Brasil agora"
+        ])
+    
+    status_box.write(f"🕵️ Buscando por: {', '.join(termos_busca)}")
     
     # 2. Busca Real
-    status_box.write("🌐 Varrendo portais de notícias...")
-    noticias_encontradas = buscar_noticias_reais(termos, timelimit, status_box)
+    noticias = buscar_noticias(termos_busca, timelimit, status_box)
     
-    if not noticias_encontradas:
+    if not noticias:
         status_box.update(label="❌ Nada encontrado.", state="error")
-        st.error("Nenhuma notícia relevante encontrada nesses termos. Tente aumentar a janela de dias.")
         st.stop()
         
-    status_box.write(f"📦 {len(noticias_encontradas)} notícias coletadas. Analisando a melhor...")
+    status_box.write(f"📦 {len(noticias)} manchetes encontradas. Criando conexão lógica...")
     
-    # 3. Geração do Roteiro
-    roteiro_final = selecionar_e_roteirizar(noticias_encontradas, nicho_atuacao, publico_alvo, tom_voz)
+    # 3. Geração
+    roteiro = selecionar_e_roteirizar_bridge(noticias, nicho_atuacao, publico_alvo)
     
-    status_box.update(label="✅ Vídeo Viral Gerado!", state="complete", expanded=False)
+    status_box.update(label="✅ Roteiro Viral Criado!", state="complete", expanded=False)
     
     # Exibição
     col1, col2 = st.columns([1.5, 1])
     
     with col1:
-        st.markdown("## 📹 Seu Roteiro")
-        st.markdown(roteiro_final)
+        st.markdown("## 📹 Roteiro Viral (The Bridge)")
+        st.markdown(roteiro)
     
     with col2:
-        st.info("🔍 Notícias Analisadas pela IA")
-        for n in noticias_encontradas:
-            with st.expander(n['title']):
-                st.caption(f"{n['source']} - {n['date']}")
+        st.info("📰 Notícias Usadas para o Contexto")
+        for n in noticias:
+            with st.expander(f"{n['title']}"):
+                st.caption(f"Origem: {n['termo_origem']}")
                 st.write(n['body'])
-                st.markdown(f"[Ler completa]({n['url']})")
+                st.markdown(f"[Link]({n['url']})")
