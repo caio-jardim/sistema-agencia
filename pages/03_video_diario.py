@@ -5,7 +5,7 @@ from groq import Groq
 from duckduckgo_search import DDGS
 
 # --- CONFIGURAÇÃO DA PÁGINA ---
-st.set_page_config(page_title="Gerador Primo Rico", page_icon="🎩")
+st.set_page_config(page_title="Gerador Vídeo Notícias", page_icon="🎩")
 
 st.title("🎩 Gerador de Pauta: Estilo Primo Rico")
 st.markdown("Monitora portais de elite (Valor, InfoMoney, CNN) e cria roteiros de autoridade.")
@@ -37,7 +37,6 @@ with st.sidebar:
     
     st.markdown("---")
     st.header("📡 Radar de Notícias")
-    # Focamos em termos que geram o tipo de notícia que o Primo Rico comenta
     temas_interesse = st.multiselect(
         "O que você quer monitorar hoje?",
         ["Impostos/Tributação", "Inflação/Dólar", "Política Econômica", "Mudanças na Lei", "Escândalos/Corrupção"],
@@ -48,15 +47,10 @@ with st.sidebar:
 
 # --- FUNÇÕES ---
 
-def buscar_nos_portais_de_elite(temas, tempo, log):
-    """
-    Em vez de buscar na web inteira, busca especificamente dentro dos sites
-    que formam a opinião do mercado financeiro/político.
-    """
+def buscar_nos_portais_de_elite(temas, tempo, log_placeholder):
     mapa_tempo = {"Últimas 24h": "d", "Última Semana": "w"}
     timelimit = mapa_tempo[tempo]
     
-    # Lista dos sites que o Primo Rico/Bruno Perini leem
     portais_elite = [
         "site:infomoney.com.br",
         "site:valor.globo.com",
@@ -72,10 +66,10 @@ def buscar_nos_portais_de_elite(temas, tempo, log):
         for tema in temas:
             for portal in portais_elite:
                 query = f"{tema} {portal}"
-                log.write(f"🔎 Lendo {portal} sobre '{tema}'...")
+                # Atualiza o status visualmente
+                log_placeholder.text(f"🔎 Lendo {portal} sobre '{tema}'...")
                 
                 try:
-                    # Busca restrita
                     results = ddgs.news(keywords=query, region="br-pt", safesearch="off", timelimit=timelimit, max_results=1)
                     for n in results:
                         if n['url'] not in urls_vistas:
@@ -84,7 +78,7 @@ def buscar_nos_portais_de_elite(temas, tempo, log):
                             urls_vistas.add(n['url'])
                 except:
                     continue
-                time.sleep(0.2) # Delay para não ser bloqueado
+                time.sleep(0.2)
                 
     return noticias_coletadas
 
@@ -93,11 +87,6 @@ def roteirizar_estilo_primo(noticia, nicho, publico):
     
     prompt = f"""
     Você é um Copywriter Sênior especialista no estilo "Primo Rico" (Thiago Nigro) ou "Bruno Perini".
-    
-    O QUE É ESSE ESTILO:
-    1. Analítico e Sóbero: Não é dancinha. É análise de cenário.
-    2. "Skin in the Game": Mostra que isso afeta o bolso de todos.
-    3. Estrutura: Fato Chocante -> Contexto Econômico -> O Perigo Invisível -> A Solução (Meu Produto).
     
     CONTEXTO DO CLIENTE:
     Nicho: {nicho}
@@ -112,19 +101,10 @@ def roteirizar_estilo_primo(noticia, nicho, publico):
     Escreva um roteiro de vídeo curto (Reels/Shorts) comentando essa notícia.
     
     ESTRUTURA DO ROTEIRO:
-    
-    1. O GRÁFICO/MANCHETE (0-5s): 
-       Comece citando a notícia. Ex: "Você viu o que saiu no Valor hoje?", "Isso aqui [aponta pra cima] vai destruir a classe média."
-    
-    2. A TRADUÇÃO (5-20s): 
-       Traduza o "economês" para a realidade. "O que isso significa na prática? Significa que o governo vai morder mais 15% do que é seu."
-    
-    3. O MEDO RACIONAL (20-40s): 
-       Por que o público alvo deve se preocupar AGORA? "Se você tem imóveis no seu CPF, essa lei pode levar metade da sua herança."
-    
-    4. A SOLUÇÃO ELITIZADA (40-60s): 
-       Como os ricos resolvem isso. "Os grandes empresários não pagam isso porque usam {nicho}. E você também pode."
-       CTA: "Me segue para blindar seu patrimônio."
+    1. O GRÁFICO/MANCHETE (0-5s): Ex: "Você viu o que saiu no Valor hoje?"
+    2. A TRADUÇÃO (5-20s): O que isso significa pro bolso dele.
+    3. O MEDO RACIONAL (20-40s): Por que se preocupar.
+    4. A SOLUÇÃO ELITIZADA (40-60s): Como a {nicho} resolve.
     
     Gere o roteiro em Markdown.
     """
@@ -132,32 +112,43 @@ def roteirizar_estilo_primo(noticia, nicho, publico):
     completion = client.chat.completions.create(
         model="llama-3.3-70b-versatile",
         messages=[{"role": "user", "content": prompt}],
-        temperature=0.6 # Mais preciso, menos alucinação
+        temperature=0.6
     )
     
     return completion.choices[0].message.content
 
-# --- INTERFACE ---
+# --- INTERFACE PRINCIPAL ---
 
+# Botão de Busca
 if st.button("🎩 Buscar Pautas de Elite", type="primary"):
     
-    status = st.status("🕵️ Monitorando portais financeiros...", expanded=True)
+    # Placeholder para logs em tempo real
+    status_text = st.empty()
+    progress_bar = st.progress(0)
     
-    # 1. Busca Direcionada
-    noticias = buscar_nos_portais_de_elite(temas_interesse, tempo_busca, status)
+    # Busca
+    noticias = buscar_nos_portais_de_elite(temas_interesse, tempo_busca, status_text)
+    
+    # Limpa status
+    status_text.empty()
+    progress_bar.empty()
     
     if not noticias:
-        status.update(label="❌ Nenhuma notícia relevante encontrada.", state="error")
-        st.error("Tente ampliar a janela de tempo ou selecionar mais temas.")
-        st.stop()
-        
-    status.write(f"📦 {len(noticias)} notícias de alta relevância encontradas.")
-    status.update(label="✅ Monitoramento Concluído!", state="complete", expanded=False)
+        st.error("Nenhuma notícia encontrada. Tente ampliar o prazo.")
+    else:
+        # SALVA NO SESSION STATE (MEMÓRIA)
+        st.session_state['noticias_primo'] = noticias
+        st.success(f"📦 {len(noticias)} notícias encontradas!")
+
+# --- EXIBIÇÃO PERSISTENTE ---
+# Verifica se existem notícias na memória para mostrar
+if 'noticias_primo' in st.session_state:
     
-    # 2. Seleção e Geração
+    st.markdown("---")
     st.subheader("📰 Escolha uma notícia para gerar o roteiro:")
     
-    for i, news in enumerate(noticias):
+    # Itera sobre as notícias salvas
+    for i, news in enumerate(st.session_state['noticias_primo']):
         with st.container(border=True):
             col_a, col_b = st.columns([3, 1])
             with col_a:
@@ -165,12 +156,21 @@ if st.button("🎩 Buscar Pautas de Elite", type="primary"):
                 st.caption(f"Fonte: {news['source']} | Tema: {news['tema_base']}")
                 st.write(news['body'])
             with col_b:
-                # Botão único para cada notícia
-                if st.button(f"✨ Gerar Roteiro", key=f"btn_{i}"):
-                    with st.spinner("Escrevendo roteiro estilo Primo Rico..."):
-                        roteiro = roteirizar_estilo_primo(news, nicho, publico)
-                        
-                        # Mostra o resultado em um modal ou abaixo
-                        st.markdown("---")
-                        st.success("📹 Roteiro Gerado:")
-                        st.markdown(roteiro)
+                # O botão agora funciona porque o loop está fora do "if button busca"
+                if st.button(f"✨ Gerar Roteiro", key=f"btn_primo_{i}"):
+                    
+                    # Salva qual notícia está sendo roteirizada para mostrar abaixo
+                    st.session_state['roteiro_ativo'] = news
+
+    # --- MOSTRAR ROTEIRO GERADO ---
+    if 'roteiro_ativo' in st.session_state:
+        st.markdown("---")
+        news_ativa = st.session_state['roteiro_ativo']
+        
+        st.info(f"📝 Gerando roteiro para: **{news_ativa['title']}**")
+        
+        with st.spinner("Escrevendo roteiro..."):
+            roteiro_final = roteirizar_estilo_primo(news_ativa, nicho, publico)
+            
+            st.success("📹 Roteiro Gerado com Sucesso!")
+            st.markdown(roteiro_final)
