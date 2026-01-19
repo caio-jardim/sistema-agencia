@@ -67,27 +67,43 @@ def limpar_json(texto):
     return texto
 
 def gerar_lista_hypes(nicho, janela, obs):
-    model = genai.GenerativeModel('gemini-2.0-flash') # Modelo rápido para listar
+    # Usando o modelo flash para velocidade na geração da lista
+    model = genai.GenerativeModel('gemini-2.0-flash') 
     data_hoje = datetime.now().strftime("%d/%m/%Y")
     
     prompt = f"""
+    # Role
+    Você é um estrategista de conteúdo Sênior, especializado em Marketing de Influência e "Newsjacking" (técnica de aproveitar notícias quentes para promover marcas). Seu estilo de escrita é inspirado em influenciadores de alta performance como "O Primo Rico" ou "Pablo Marçal": direto, levemente polêmico, focado em oportunidade/medo, e com alta autoridade.
+
     # Contexto
-    Data: {data_hoje} | Janela: {janela} | Nicho: {nicho}
-    OBSERVAÇÕES IMPORTANTES DO CLIENTE: "{obs}"
-    (Se a observação pedir para NÃO falar de algo, obedeça estritamente).
+    - Data Atual: {data_hoje}
+    - Janela de Análise: {janela}
+    - Nicho do Cliente: {nicho}
+    - OBSERVAÇÕES E RESTRIÇÕES DO CLIENTE: "{obs}"
+    (ATENÇÃO: Respeite rigorosamente as observações acima. Se pedir para evitar um tema, evite).
 
     # Tarefa
-    Liste 20 ideias de vídeos curtos baseados em Hypes atuais.
-    Regra de Ouro: Conecte assuntos de Economia, Pop Culture, Política e Cotidiano com o nicho "{nicho}".
+    Gere 20 ideias de roteiros de vídeos curtos (Reels/TikTok) baseados nos assuntos mais quentes ("Hypes") do momento exato da data atual.
+
+    # Regras de Criação (O Método "Primo Rico")
+    1. **Diversidade:** Não fale apenas de economia. Misture:
+       - 30% Economia/Dinheiro (Impostos, Bancos, Investimentos).
+       - 30% Pop Culture/Fofoca (BBB, Divórcios de famosos, Memes do Twitter/X, Futebol, Filmes).
+       - 20% Política/Leis (Novas regras, falas de presidentes, geopolítica).
+       - 20% Cotidiano/Medo (Crimes, Doenças, Clima, Preços).
+    2. **A Ponte (O Gancho):** O segredo é a conexão. Você deve pegar um assunto que NÃO tem nada a ver com o nicho e criar uma conexão lógica e surpreendente.
+       - Exemplo errado: "O dólar subiu, contrate meu estúdio." (Chato).
+       - Exemplo certo: "O dólar subiu e seu equipamento ficou 30% mais caro de repor. Se seu estúdio pegar fogo hoje, o seguro cobre o preço antigo ou o novo? Vamos falar de atualização patrimonial."
+    3. **Tom de Voz:** Urgência, Oportunidade ou Indignação. Use gatilhos mentais.
 
     # Formato de Saída (JSON ESTRITO)
-    Retorne APENAS um Array JSON. Sem texto antes ou depois.
-    Estrutura:
+    Para que o sistema leia, retorne APENAS um Array JSON válido. Não use Markdown de código (```json).
+    Siga estritamente esta estrutura de chaves:
     [
         {{
-            "titulo": "Nome curto e chamativo",
-            "hype": "Por que isso é falado hoje",
-            "gancho": "A frase falada pelo expert conectando o hype ao nicho"
+            "titulo": "Nome do Tema Curto e Chamativo",
+            "hype": "Explique em 2 linhas por que isso está sendo falado hoje. Qual é a polêmica ou a dor?",
+            "gancho": "Escreva o roteiro falado (speech) que o especialista deve dizer. Comece comentando a notícia e termine vendendo a necessidade do serviço/produto do nicho. Seja persuasivo."
         }},
         ...
     ]
