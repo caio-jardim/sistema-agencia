@@ -118,10 +118,10 @@ def gerar_lista_hypes(nicho, janela, obs):
         return []
 
 def expandir_roteiro_final(item, nicho, obs):
-    # Inicializa a Groq pegando a chave dos secrets
-    # Certifique-se de ter [groq_api_key] no seu secrets.toml
+    # Inicializa a Groq pegando a chave do bloco [groq]
     try:
-        client = Groq(api_key=st.secrets["groq_api_key"])
+        # AQUI MUDOU: Agora acessamos st.secrets["groq"]["api_key"]
+        client = Groq(api_key=st.secrets["groq"]["api_key"])
     except:
         st.error("Erro: Chave da Groq não encontrada em secrets.toml")
         return "Erro de configuração."
@@ -165,12 +165,11 @@ def expandir_roteiro_final(item, nicho, obs):
         completion = client.chat.completions.create(
             model="llama-3.3-70b-versatile",
             messages=[{"role": "user", "content": prompt}],
-            temperature=0.7 # Criatividade alta para copy
+            temperature=0.7 
         )
         return completion.choices[0].message.content
     except Exception as e:
         return f"Erro na Groq: {e}"
-
 # --- INTERFACE PRINCIPAL ---
 
 col1, col2 = st.columns([2, 1])
