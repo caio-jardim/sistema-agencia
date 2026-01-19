@@ -68,7 +68,7 @@ def limpar_json(texto):
 
 def gerar_lista_hypes(nicho, janela, obs):
     # Usando o modelo flash para velocidade na geração da lista
-    model = genai.GenerativeModel('gemini-2.0-flash') 
+    model = genai.GenerativeModel('gemini-2.5-pro') 
     data_hoje = datetime.now().strftime("%d/%m/%Y")
     
     prompt = f"""
@@ -118,31 +118,58 @@ def gerar_lista_hypes(nicho, janela, obs):
         return []
 
 def expandir_roteiro_final(item, nicho, obs):
-    model = genai.GenerativeModel('gemini-2.0-flash')
-    
-    prompt = f"""
-    Aja como um Copywriter Sênior (Estilo Primo Rico / Pablo Marçal).
-    
-    # DADOS
-    Nicho: {nicho}
-    Observações: {obs}
-    Tema Escolhido: {item['titulo']}
-    Hype Base: {item['hype']}
-    Gancho Inicial: {item['gancho']}
+    # Inicializa a Groq pegando a chave dos secrets
+    # Certifique-se de ter [groq_api_key] no seu secrets.toml
+    try:
+        client = Groq(api_key=st.secrets["groq_api_key"])
+    except:
+        st.error("Erro: Chave da Groq não encontrada em secrets.toml")
+        return "Erro de configuração."
 
-    # TAREFA
-    Escreva o roteiro completo para Reels (aprox 60 segundos).
+    prompt = f"""
+    Você é um Copywriter Sênior especialista em retenção e viralidade (Estilo Primo Rico / Pablo Marçal).
     
-    # ESTRUTURA
-    1. GANCHO VISUAL/VERBAL (Use o gancho fornecido, mas melhore se puder).
-    2. DESENVOLVIMENTO (Retenção): Explique a lógica, gere medo ou oportunidade.
-    3. CTA (Chamada para Ação): Venda o serviço de forma elegante.
+    # CONTEXTO
+    Nicho do Cliente: {nicho}
+    Observações e Restrições: {obs}
     
-    Formato: Markdown bonito.
+    # A PAUTA ESCOLHIDA
+    Tema: {item['titulo']}
+    Hype/Contexto: {item['hype']}
+    Gancho Inicial Sugerido: {item['gancho']}
+
+    # SUA TAREFA
+    Escreva o roteiro FALADO completo para um Reels/TikTok de 60 segundos.
+    
+    # ESTRUTURA DO ROTEIRO (Use Markdown):
+    
+    ### 1. GANCHO VISUAL E VERBAL (0-5s)
+    (Use o gancho sugerido acima, mas refine para ser impossível de ignorar. Descreva o que aparece na tela).
+    
+    ### 2. A CONEXÃO (5-20s)
+    (Explique o hype rapidamente e conecte imediatamente com a dor do cliente. Use "Você").
+    
+    ### 3. O MEDO OU A OPORTUNIDADE (20-45s)
+    (Desenvolva o raciocínio. Por que quem ignora isso vai perder dinheiro ou ter problemas? Seja enfático).
+    
+    ### 4. A SOLUÇÃO ELITIZADA (45-60s)
+    (Apresente a solução do {nicho} como a única saída inteligente).
+    
+    ### 5. CTA (Chamada para Ação)
+    (Uma frase curta e direta para seguir ou comentar).
+    
+    IMPORTANTE: O texto deve ser conversacional, direto e sem enrolação.
     """
     
-    response = model.generate_content(prompt)
-    return response.text
+    try:
+        completion = client.chat.completions.create(
+            model="llama-3.3-70b-versatile",
+            messages=[{"role": "user", "content": prompt}],
+            temperature=0.7 # Criatividade alta para copy
+        )
+        return completion.choices[0].message.content
+    except Exception as e:
+        return f"Erro na Groq: {e}"
 
 # --- INTERFACE PRINCIPAL ---
 
