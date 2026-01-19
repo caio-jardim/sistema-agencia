@@ -1,14 +1,13 @@
 import streamlit as st
-import json
+import google.generativeai as genai
+from datetime import datetime
 import time
-from groq import Groq
-from duckduckgo_search import DDGS
 
 # --- CONFIGURAÇÃO DA PÁGINA ---
-st.set_page_config(page_title="Gerador Vídeo Notícias", page_icon="🎩")
+st.set_page_config(page_title="Gerador de Hypes - Gemini", page_icon="🔥", layout="wide")
 
-st.title("🎩 Gerador de Pauta: Estilo Primo Rico")
-st.markdown("Monitora portais de elite (Valor, InfoMoney, CNN) e cria roteiros de autoridade.")
+st.title("🔥 Gerador de Pautas Virais: Estilo Primo Rico")
+st.markdown("Identifica os hypes do momento e cria conexões lógicas com seu nicho usando IA.")
 st.markdown("---")
 
 # --- LOGIN ---
@@ -29,148 +28,96 @@ def check_password():
 if not check_password():
     st.stop()
 
+# --- CONFIGURAÇÃO GEMINI ---
+try:
+    genai.configure(api_key=st.secrets["gemini"]["api_marcio"])
+except Exception as e:
+    st.error("Erro ao configurar API do Gemini. Verifique o secrets.toml")
+    st.stop()
+
 # --- INPUTS ---
 with st.sidebar:
-    st.header("🎯 Seu Posicionamento")
-    nicho = st.text_input("Nicho", "Holding Familiar")
-    publico = st.text_area("Público", "Empresários com patrimônio acima de 1MM")
+    st.header("🎯 Configuração do Radar")
     
-    st.markdown("---")
-    st.header("📡 Radar de Notícias")
-    temas_interesse = st.multiselect(
-        "O que você quer monitorar hoje?",
-        ["Impostos/Tributação", "Inflação/Dólar", "Política Econômica", "Mudanças na Lei", "Escândalos/Corrupção"],
-        default=["Impostos/Tributação", "Política Econômica"]
+    nicho = st.text_input("Seu Nicho", "Holding Familiar")
+    
+    janela_tempo = st.selectbox(
+        "Janela de Tempo", 
+        ["Hoje (Últimas 24h)", "Última Semana", "Último Mês"],
+        index=1
     )
     
-    tempo_busca = st.selectbox("Janela de Tempo", ["Últimas 24h", "Última Semana"], index=0)
+    st.info("💡 A IA irá cruzar fatos atuais de economia, cultura pop e política com o seu nicho.")
 
-# --- FUNÇÕES ---
-
-def buscar_nos_portais_de_elite(temas, tempo, log_placeholder):
-    mapa_tempo = {"Últimas 24h": "d", "Última Semana": "w"}
-    timelimit = mapa_tempo[tempo]
+# --- FUNÇÃO GERADORA ---
+def gerar_pautas_gemini(nicho, janela):
+    # Modelo recomendado: gemini-1.5-flash (rápido e atualizado) ou gemini-1.5-pro
+    model = genai.GenerativeModel('gemini-2.5-pro')
     
-    portais_elite = [
-        "site:infomoney.com.br",
-        "site:valor.globo.com",
-        "site:cnnbrasil.com.br/economia",
-        "site:g1.globo.com/economia",
-        "site:uol.com.br/economia"
-    ]
-    
-    noticias_coletadas = []
-    urls_vistas = set()
-    
-    with DDGS() as ddgs:
-        for tema in temas:
-            for portal in portais_elite:
-                query = f"{tema} {portal}"
-                # Atualiza o status visualmente
-                log_placeholder.text(f"🔎 Lendo {portal} sobre '{tema}'...")
-                
-                try:
-                    results = ddgs.news(keywords=query, region="br-pt", safesearch="off", timelimit=timelimit, max_results=1)
-                    for n in results:
-                        if n['url'] not in urls_vistas:
-                            n['tema_base'] = tema
-                            noticias_coletadas.append(n)
-                            urls_vistas.add(n['url'])
-                except:
-                    continue
-                time.sleep(0.2)
-                
-    return noticias_coletadas
-
-def roteirizar_estilo_primo(noticia, nicho, publico):
-    client = Groq(api_key=st.secrets["groq_api_key"])
+    data_hoje = datetime.now().strftime("%d/%m/%Y")
     
     prompt = f"""
-    Você é um Copywriter Sênior especialista no estilo "Primo Rico" (Thiago Nigro) ou "Bruno Perini".
-    
-    CONTEXTO DO CLIENTE:
-    Nicho: {nicho}
-    Público: {publico}
-    
-    A NOTÍCIA BOMBA:
-    Título: {noticia['title']}
-    Fonte: {noticia['source']}
-    Resumo: {noticia['body']}
-    
-    SUA TAREFA:
-    Escreva um roteiro de vídeo curto (Reels/Shorts) comentando essa notícia.
-    
-    ESTRUTURA DO ROTEIRO:
-    1. O GRÁFICO/MANCHETE (0-5s): Ex: "Você viu o que saiu no Valor hoje?"
-    2. A TRADUÇÃO (5-20s): O que isso significa pro bolso dele.
-    3. O MEDO RACIONAL (20-40s): Por que se preocupar.
-    4. A SOLUÇÃO ELITIZADA (40-60s): Como a {nicho} resolve.
-    
-    Gere o roteiro em Markdown.
+    # Role
+    Você é um estrategista de conteúdo Sênior, especializado em Marketing de Influência e "Newsjacking". Seu estilo de escrita é inspirado em influenciadores de alta performance como "O Primo Rico" ou "Pablo Marçal": direto, levemente polêmico, focado em oportunidade/medo, e com alta autoridade.
+
+    # Contexto
+    - Data Atual de referência: {data_hoje}
+    - Janela de Análise: {janela}
+    - Nicho do Cliente: {nicho}
+    - Público-Alvo: Pessoas que precisam desse serviço, mas talvez não saibam que precisam agora.
+
+    # Tarefa
+    Gere 20 ideias de roteiros de vídeos curtos (Reels/TikTok) baseados nos assuntos mais quentes ("Hypes") do momento.
+
+    # Regras de Criação (O Método "Primo Rico")
+    1. **Diversidade:** Não fale apenas de economia. Misture:
+       - 30% Economia/Dinheiro (Impostos, Bancos, Investimentos).
+       - 30% Pop Culture/Fofoca (BBB, Divórcios de famosos, Memes do Twitter/X, Futebol).
+       - 20% Política/Leis (Novas regras, falas de presidentes, geopolítica).
+       - 20% Cotidiano/Medo (Crimes, Doenças, Clima, Preços).
+    2. **A Ponte (O Gancho):** O segredo é a conexão. Você deve pegar um assunto que NÃO tem nada a ver com o nicho e criar uma conexão lógica e surpreendente.
+       - Exemplo errado: "O dólar subiu, contrate meu estúdio." (Chato).
+       - Exemplo certo: "O dólar subiu e seu equipamento ficou 30% mais caro de repor. Se seu estúdio pegar fogo hoje, o seguro cobre o preço antigo ou o novo? Vamos falar de atualização patrimonial."
+    3. **Tom de Voz:** Urgência, Oportunidade ou Indignação.
+
+    # Formato de Saída (Estrito)
+    Para cada um dos 20 temas, use EXATAMENTE esta estrutura (use Markdown):
+
+    ### 1. [Nome do Tema Curto e Chamativo]
+    * **Tema:** [Resumo de 1 linha sobre o que é o assunto]
+    * **O Hype:** [Explique em 2 linhas por que isso está sendo falado hoje. Qual é a polêmica ou a dor?]
+    * **Gancho para o nicho:** [Escreva o roteiro falado (speech) que o especialista deve dizer. Comece comentando a notícia e termine vendendo a necessidade do serviço/produto do {nicho}. Seja persuasivo.]
+
+    ---
+    (Repita para os 20 itens)
     """
     
-    completion = client.chat.completions.create(
-        model="llama-3.3-70b-versatile",
-        messages=[{"role": "user", "content": prompt}],
-        temperature=0.6
-    )
-    
-    return completion.choices[0].message.content
+    try:
+        response = model.generate_content(prompt)
+        return response.text
+    except Exception as e:
+        return f"Erro na geração: {e}"
 
 # --- INTERFACE PRINCIPAL ---
 
-# Botão de Busca
-if st.button("🎩 Buscar Pautas de Elite", type="primary"):
-    
-    # Placeholder para logs em tempo real
-    status_text = st.empty()
-    progress_bar = st.progress(0)
-    
-    # Busca
-    noticias = buscar_nos_portais_de_elite(temas_interesse, tempo_busca, status_text)
-    
-    # Limpa status
-    status_text.empty()
-    progress_bar.empty()
-    
-    if not noticias:
-        st.error("Nenhuma notícia encontrada. Tente ampliar o prazo.")
+col1, col2 = st.columns([2, 1])
+with col1:
+    st.write(f"Gerando pautas para: **{nicho}**")
+with col2:
+    btn_gerar = st.button("🚀 Gerar 20 Pautas Virais", type="primary", use_container_width=True)
+
+if btn_gerar:
+    if not nicho:
+        st.warning("Por favor, preencha o nicho.")
     else:
-        # SALVA NO SESSION STATE (MEMÓRIA)
-        st.session_state['noticias_primo'] = noticias
-        st.success(f"📦 {len(noticias)} notícias encontradas!")
-
-# --- EXIBIÇÃO PERSISTENTE ---
-# Verifica se existem notícias na memória para mostrar
-if 'noticias_primo' in st.session_state:
-    
-    st.markdown("---")
-    st.subheader("📰 Escolha uma notícia para gerar o roteiro:")
-    
-    # Itera sobre as notícias salvas
-    for i, news in enumerate(st.session_state['noticias_primo']):
-        with st.container(border=True):
-            col_a, col_b = st.columns([3, 1])
-            with col_a:
-                st.markdown(f"**{news['title']}**")
-                st.caption(f"Fonte: {news['source']} | Tema: {news['tema_base']}")
-                st.write(news['body'])
-            with col_b:
-                # O botão agora funciona porque o loop está fora do "if button busca"
-                if st.button(f"✨ Gerar Roteiro", key=f"btn_primo_{i}"):
-                    
-                    # Salva qual notícia está sendo roteirizada para mostrar abaixo
-                    st.session_state['roteiro_ativo'] = news
-
-    # --- MOSTRAR ROTEIRO GERADO ---
-    if 'roteiro_ativo' in st.session_state:
-        st.markdown("---")
-        news_ativa = st.session_state['roteiro_ativo']
-        
-        st.info(f"📝 Gerando roteiro para: **{news_ativa['title']}**")
-        
-        with st.spinner("Escrevendo roteiro..."):
-            roteiro_final = roteirizar_estilo_primo(news_ativa, nicho, publico)
+        with st.spinner("🧠 O Gemini está analisando os hypes do momento..."):
+            # Chama a função
+            resultado = gerar_pautas_gemini(nicho, janela_tempo)
             
-            st.success("📹 Roteiro Gerado com Sucesso!")
-            st.markdown(roteiro_final)
+            st.success("Pautas geradas com sucesso!")
+            st.markdown("---")
+            st.markdown(resultado)
+
+# --- RODAPÉ ---
+st.markdown("---")
+st.caption("Powered by Google Gemini Pro | Desenvolvido pela Equipe de Conteúdo")
