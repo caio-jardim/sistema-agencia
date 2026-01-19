@@ -8,8 +8,7 @@ import re
 # --- CONFIGURAÇÃO DA PÁGINA ---
 st.set_page_config(page_title="Gerador de Hypes - Gemini", page_icon="🔥", layout="wide")
 
-st.title("🔥 Gerador de Pautas Virais: Estilo Primo Rico")
-st.markdown("Identifica os hypes do momento e cria conexões lógicas com seu nicho usando IA.")
+st.title("🔥 Gerador de Pautas Virais")
 st.markdown("---")
 
 # --- LOGIN ---
@@ -236,4 +235,3 @@ if 'pauta_ativa' in st.session_state:
 
 # --- RODAPÉ ---
 st.markdown("---")
-st.caption("Powered by Google Gemini 2.0 | Content AI")
