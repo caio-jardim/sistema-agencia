@@ -118,13 +118,9 @@ def gerar_lista_hypes(nicho, janela, obs):
         return []
 
 def expandir_roteiro_final(item, nicho, obs):
-    # Inicializa a Groq pegando a chave do bloco [groq]
-    try:
-        # AQUI MUDOU: Agora acessamos st.secrets["groq"]["api_key"]
-        client = Groq(api_key=st.secrets["groq"]["api_key"])
-    except:
-        st.error("Erro: Chave da Groq não encontrada em secrets.toml")
-        return "Erro de configuração."
+    # Acessa diretamente a chave no bloco [groq] do secrets.toml
+    # Sem try/except para garantir que ele leia o valor real
+    client = Groq(api_key=st.secrets["groq"]["api_key"])
 
     prompt = f"""
     Você é um Copywriter Sênior especialista em retenção e viralidade (Estilo Primo Rico / Pablo Marçal).
