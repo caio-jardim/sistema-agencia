@@ -55,8 +55,6 @@ with st.sidebar:
     CTA_PADRAO = st.text_area("Chamada para Ação (CTA)", value="Comente 'OURO' para receber o guia gratuito.")
     NOME_PLANILHA = st.text_input("Nome da Planilha", value="Conteudo")
     
-    st.info("As credenciais estão sendo lidas do arquivo secrets.toml")
-
 # --- FUNÇÕES (Lógica Original Preservada) ---
 
 def conectar_sheets():

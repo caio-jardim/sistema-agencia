@@ -58,7 +58,6 @@ with st.sidebar:
     TOP_VIDEOS = st.number_input("Top Vídeos para salvar", min_value=1, value=5)
     TOP_ANALISE_IA = st.number_input("Analisar com IA (Top X)", min_value=0, value=1)
     
-    st.success("✅ Cache Inteligente Ativo: Evita re-gastar créditos em vídeos já analisados.")
 
 # --- FUNÇÕES ---
 

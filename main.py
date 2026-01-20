@@ -65,4 +65,4 @@ with col1:
 
 # Rodapé
 st.markdown("---")
-st.caption("Uso Interno da Agência")
+st.caption("Uso Interno")
