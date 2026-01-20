@@ -58,19 +58,9 @@ with col1:
     st.markdown("""
     **Ferramentas Disponíveis:**
     
-    1.  **Gerador de Roteiros:** Cria scripts virais baseados em "modelagem".
-    2.  **Instagram Insights:** Análise básica de métricas e Top Posts.
-    3.  **Análise Profunda (Groq):** Transcrição completa e análise de retenção.
-    """)
-
-with col2:
-    st.success("🔒 **Status do Sistema:** Online e Seguro")
-    st.markdown("""
-    **Novidades v1.0:**
-    * Integração com Google Sheets ✅
-    * IA Llama 3 ✅
-    * Login seguro do Instagram ✅
-    * Autenticação simples
+    1.  **Instagram Insights:** Análise básica de métricas e Top Posts.
+    2.  **Gerador de Roteiros:** Cria scripts virais baseados em "modelagem".
+    3.  **Vídeo Diário:** Gera temas da semana e ganchos com o nicho selecionado.
     """)
 
 # Rodapé
