@@ -80,22 +80,21 @@ Por que funciona: Define um vilão (pressa/atalhos) e posiciona a marca como que
 
 def download_youtube_audio(url):
     """
-    Baixa áudio do YouTube usando yt_dlp.
-    Tenta via Proxy Apify (grupo 'auto') e faz fallback se falhar.
+    Baixa áudio do YouTube usando yt-dlp simulando um CLIENTE ANDROID.
+    Isso ajuda a evitar o erro 403 em servidores de nuvem sem usar Proxy.
     """
     output_filename = "temp_yt_audio"
     
-    # Tenta configurar o Proxy 'auto' (disponível em contas free)
-    proxy_url = None
-    if "apify_token" in st.secrets:
-        token = st.secrets["apify_token"]
-        # MUDANÇA AQUI: Trocamos 'groups-RESIDENTIAL' por 'auto'
-        proxy_url = f"http://auto:{token}@proxy.apify.com:8000"
-
-    # Configuração base do yt-dlp
+    # Configuração 'Mágica' para evitar bloqueio 403
     ydl_opts = {
         'format': 'bestaudio/best',
         'outtmpl': output_filename,
+        # Força o yt-dlp a agir como um App Android e não um navegador
+        'extractor_args': {
+            'youtube': {
+                'player_client': ['android', 'ios'],
+            }
+        },
         'postprocessors': [{
             'key': 'FFmpegExtractAudio',
             'preferredcodec': 'mp3',
@@ -107,48 +106,34 @@ def download_youtube_audio(url):
         'noplaylist': True,
     }
 
-    # --- TENTATIVA 1: COM PROXY (AUTO) ---
-    if proxy_url:
-        try:
-            st.info("🔄 Tentando download via Proxy Apify (Auto)...")
-            ydl_opts['proxy'] = proxy_url
-            
-            with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-                ydl.download([url])
-            
-            final_filename = f"{output_filename}.mp3"
-            if os.path.exists(final_filename):
-                return final_filename
-                
-        except Exception as e:
-            st.warning(f"⚠️ Proxy falhou ({e}). Tentando conexão direta...")
-
-    # --- TENTATIVA 2: CONEXÃO DIRETA (FALLBACK) ---
-    # Se o proxy falhar (ou não existir), tenta baixar direto
-    # Adicionamos headers de navegador para tentar passar pelo bloqueio 403
     try:
-        if 'proxy' in ydl_opts:
-            del ydl_opts['proxy'] # Remove o proxy que falhou
-            
-        # Headers para "fingir" ser um navegador real
-        ydl_opts['http_headers'] = {
-            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/123.0.0.0 Safari/537.36',
-            'Accept-Language': 'en-US,en;q=0.9',
-            'Referer': 'https://www.youtube.com/',
-        }
-            
+        st.info("🔄 Tentando download (Modo Camuflagem Android)...")
+        
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
             ydl.download([url])
-            
+        
         final_filename = f"{output_filename}.mp3"
+        
         if os.path.exists(final_filename):
             return final_filename
+        
+        # Fallback: às vezes ele não renomeia
+        if os.path.exists(output_filename):
+            return output_filename
             
         return None
 
     except Exception as e:
-        st.error(f"❌ Falha total no download: {e}")
-        return None
+        # Se o método Android falhar, tentamos o método Web Creator (última chance)
+        st.warning(f"Método Android falhou: {e}. Tentando método Web Creator...")
+        try:
+            ydl_opts['extractor_args']['youtube']['player_client'] = ['web_creator']
+            with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+                ydl.download([url])
+            return f"{output_filename}.mp3"
+        except Exception as e2:
+            st.error(f"❌ Falha total. O YouTube bloqueou o IP do Streamlit. Solução: Rodar localmente ou usar Proxy Pago.")
+            return None
 
 def download_file(url, filename):
     """Baixa arquivo de uma URL genérica"""
