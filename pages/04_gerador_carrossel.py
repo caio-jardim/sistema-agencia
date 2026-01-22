@@ -262,7 +262,7 @@ def agente_arquiteto_carrossel(ideia_escolhida, conteudo_base):
                 {"role": "system", "content": SYSTEM_PROMPT_ARQUITETO},
                 {"role": "user", "content": prompt_user}
             ],
-            model="llama3-70b-versatile",  # Modelo Sênior
+            model="llama-3.3-70b-versatile",  # Modelo Sênior
             temperature=0.5,          # Equilíbrio
             top_p=0.9,
             max_tokens=1024,
