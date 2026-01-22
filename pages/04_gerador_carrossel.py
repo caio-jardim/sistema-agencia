@@ -15,7 +15,7 @@ st.title("🎠 Gerador de Carrosséis: Método Tempestade")
 st.markdown("Transforme qualquer conteúdo (YouTube, Reels ou Post) em 3 estruturas validadas psicologicamente.")
 st.markdown("---")
 
-# --- LOGIN (Padrão do seu sistema) ---
+# --- LOGIN ---
 def check_password():
     if "password_correct" in st.session_state and st.session_state["password_correct"]:
         return True
@@ -35,8 +35,19 @@ if not check_password():
 
 # --- CONFIGURAÇÕES DE API ---
 try:
-    client_groq = Groq(api_key=st.secrets["groq"]["api_key"])
-    client_apify = ApifyClient(st.secrets["apify_token"])
+    # Ajuste para ler do bloco [groq] conforme seu secrets.toml
+    if "groq" in st.secrets and "api_key" in st.secrets["groq"]:
+        client_groq = Groq(api_key=st.secrets["groq"]["api_key"])
+    else:
+        st.error("Chave Groq não encontrada em [groq] api_key.")
+        st.stop()
+        
+    if "apify_token" in st.secrets:
+        client_apify = ApifyClient(st.secrets["apify_token"])
+    else:
+        st.error("Token Apify não encontrado.")
+        st.stop()
+
 except Exception as e:
     st.error(f"Erro de configuração de chaves: {e}")
     st.stop()
@@ -58,21 +69,6 @@ FORMATO DE RESPOSTA OBRIGATÓRIO (Siga estritamente):
    Estrutura: [Nome técnico da estrutura]
    Por que funciona: [Explicação estratégica de como isso muda a percepção ou ataca uma crença]
 
-EXEMPLOS DE TREINAMENTO (FEW-SHOT):
-
-Usuário: Ideias para Padaria Artesanal.
-Você:
-1. “O pão que você compra não é pão”
-Estrutura: Confrontação de realidade + quebra de senso comum
-Por que funciona: Ataca uma crença automática do público e reposiciona a padaria como referência técnica. A ideia não é ensinar receita, e sim mudar o critério de julgamento.
-
-2. “Por que essa fornada nunca fica igual à outra”
-Estrutura: Bastidores + dinâmica invisível do processo
-Por que funciona: Revela que a imperfeição controlada é sinal de qualidade artesanal. Educa o público a valorizar variáveis como fermentação natural. Transforma "defeito" em prova de excelência.
-
-3. “O erro que faz a maioria desistir do pão artesanal”
-Estrutura: Combate ao inimigo + posicionamento claro
-Por que funciona: Define um vilão (pressa/atalhos) e posiciona a marca como quem escolheu o caminho difícil. Filtra curiosos de compradores reais.
 (Gere exatamente 3 opções distintas baseadas no tema do input).
 """
 
@@ -85,11 +81,10 @@ def download_youtube_audio(url):
     """
     output_filename = "temp_yt_audio"
     
-    # Configuração 'Mágica' para evitar bloqueio 403
     ydl_opts = {
         'format': 'bestaudio/best',
         'outtmpl': output_filename,
-        # Força o yt-dlp a agir como um App Android e não um navegador
+        # O SEGREDO: Força o yt-dlp a agir como um App Android
         'extractor_args': {
             'youtube': {
                 'player_client': ['android', 'ios'],
@@ -107,38 +102,72 @@ def download_youtube_audio(url):
     }
 
     try:
-        st.info("🔄 Tentando download (Modo Camuflagem Android)...")
-        
+        # Tenta modo Android
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
             ydl.download([url])
         
         final_filename = f"{output_filename}.mp3"
-        
         if os.path.exists(final_filename):
             return final_filename
-        
-        # Fallback: às vezes ele não renomeia
         if os.path.exists(output_filename):
             return output_filename
             
         return None
 
     except Exception as e:
-        # Se o método Android falhar, tentamos o método Web Creator (última chance)
-        st.warning(f"Método Android falhou: {e}. Tentando método Web Creator...")
+        st.warning(f"Método Android falhou ({e}). Tentando método Web Creator...")
         try:
+            # Tenta modo Web Creator como fallback
             ydl_opts['extractor_args']['youtube']['player_client'] = ['web_creator']
             with yt_dlp.YoutubeDL(ydl_opts) as ydl:
                 ydl.download([url])
             return f"{output_filename}.mp3"
         except Exception as e2:
-            st.error(f"❌ Falha total. O YouTube bloqueou o IP do Streamlit. Solução: Rodar localmente ou usar Proxy Pago.")
+            st.error(f"❌ Falha no download do YouTube: {e2}")
             return None
 
-def download_file(url, filename):
-    """Baixa arquivo de uma URL genérica"""
+def get_instagram_data_apify(url):
+    """
+    Usa Apify para pegar dados do post (Reels ou Carrossel).
+    Esta função estava faltando no seu código anterior.
+    """
+    run_input = {
+        "directUrls": [url],
+        "resultsType": "posts",
+        "searchType": "url",
+        "proxy": {
+            "useApifyProxy": True,
+            "apifyProxyGroups": ["RESIDENTIAL"]
+        }
+    }
+    
+    # Se não tiver proxy residencial pago, usamos o 'AUTO' ou removemos o proxy
+    # Ajuste para contas free:
+    # run_input["proxy"] = {"useApifyProxy": True, "apifyProxyGroups": []} 
+    
     try:
-        response = requests.get(url, stream=True)
+        # Chama o Actor "instagram-scraper"
+        run = client_apify.actor("apify/instagram-scraper").call(run_input=run_input)
+        
+        if not run: 
+            return None
+        
+        # Pega os resultados do dataset
+        dataset_items = client_apify.dataset(run["defaultDatasetId"]).list_items().items
+        
+        if dataset_items:
+            return dataset_items[0]
+            
+        return None
+    except Exception as e:
+        st.error(f"Erro na Apify: {e}")
+        return None
+
+def download_file(url, filename):
+    """Baixa arquivo de uma URL genérica (para vídeo do Instagram)"""
+    try:
+        headers = {"User-Agent": "Mozilla/5.0"}
+        response = requests.get(url, headers=headers, stream=True)
         response.raise_for_status()
         with open(filename, 'wb') as f:
             for chunk in response.iter_content(chunk_size=8192):
@@ -172,7 +201,7 @@ def agente_tempestade(conteudo_base):
                 {"role": "system", "content": SYSTEM_PROMPT_TEMPESTADE},
                 {"role": "user", "content": prompt_user}
             ],
-            model="llama3-70b-8192",
+            model="llama-3.3-70b-versatile", # Ajustado para modelo disponível
             temperature=0.5,
         )
         return completion.choices[0].message.content
@@ -212,6 +241,7 @@ if st.button("⚡ Gerar Tempestade de Ideias", type="primary"):
         # --- FLUXO 2: REELS ---
         elif tipo_conteudo == "Reels (Instagram)":
             status.write("🕵️ Acessando Instagram via Apify...")
+            # AQUI ESTAVA O ERRO: Chamando a função agora definida
             post_data = get_instagram_data_apify(url_input)
             
             if post_data and (post_data.get('videoUrl') or post_data.get('video_url')):
@@ -236,7 +266,7 @@ if st.button("⚡ Gerar Tempestade de Ideias", type="primary"):
                     except Exception as e:
                         st.error(f"Erro processando vídeo: {e}")
             else:
-                st.error("Não foi possível encontrar o vídeo neste link.")
+                st.error("Não foi possível encontrar o vídeo neste link ou erro na Apify.")
 
         # --- FLUXO 3: CARROSSEL ---
         elif tipo_conteudo == "Carrossel (Instagram)":
@@ -246,7 +276,13 @@ if st.button("⚡ Gerar Tempestade de Ideias", type="primary"):
             if post_data:
                 # Estratégia: Pegar a legenda e textos alternativos (se houver)
                 caption = post_data.get('caption') or post_data.get('description') or ""
-                alt_texts = [child.get('alt') for child in post_data.get('childPosts', []) if child.get('alt')]
+                
+                # Tenta pegar alt text das imagens filhas
+                alt_texts = []
+                children = post_data.get('childPosts') or post_data.get('children') or []
+                for child in children:
+                    if child.get('alt'):
+                        alt_texts.append(child.get('alt'))
                 
                 texto_para_analise = f"LEGENDA DO POST:\n{caption}\n\nCONTEXTO VISUAL (Alt Text):\n{' '.join(alt_texts)}"
                 
@@ -264,8 +300,6 @@ if st.button("⚡ Gerar Tempestade de Ideias", type="primary"):
             if resultado:
                 st.subheader("⛈️ Estruturas Geradas")
                 st.markdown(resultado)
-                
-                # Botão para copiar (gambiarra visual do Streamlit)
                 st.code(resultado, language="markdown")
         else:
             status.update(label="Falha no processamento", state="error")
