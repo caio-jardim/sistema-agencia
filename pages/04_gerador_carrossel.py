@@ -80,21 +80,19 @@ Por que funciona: Define um vilão (pressa/atalhos) e posiciona a marca como que
 
 def download_youtube_audio(url):
     """
-    Baixa áudio do YouTube usando yt_dlp + Proxy Residencial (Apify)
-    para evitar bloqueio 403 no Streamlit Cloud.
+    Baixa áudio do YouTube usando yt_dlp.
+    Tenta via Proxy Apify (grupo 'auto') e faz fallback se falhar.
     """
-    output_filename = "temp_yt_audio" # Nome fixo para facilitar
+    output_filename = "temp_yt_audio"
     
-    # 1. Configura o Proxy (O Segredo para funcionar na Nuvem)
+    # Tenta configurar o Proxy 'auto' (disponível em contas free)
+    proxy_url = None
     if "apify_token" in st.secrets:
         token = st.secrets["apify_token"]
-        # Tenta proxy residencial (menos chance de bloqueio)
-        proxy_url = f"http://groups-RESIDENTIAL:{token}@proxy.apify.com:8000"
-    else:
-        st.warning("⚠️ Token Apify não achado. Tentando sem proxy (pode dar erro 403)...")
-        proxy_url = None
+        # MUDANÇA AQUI: Trocamos 'groups-RESIDENTIAL' por 'auto'
+        proxy_url = f"http://auto:{token}@proxy.apify.com:8000"
 
-    # 2. Suas configurações originais (adaptadas)
+    # Configuração base do yt-dlp
     ydl_opts = {
         'format': 'bestaudio/best',
         'outtmpl': output_filename,
@@ -106,29 +104,50 @@ def download_youtube_audio(url):
         'quiet': True,
         'no_warnings': True,
         'nocheckcertificate': True,
-        'noplaylist': True, # Garante que baixa só o vídeo, não a playlist inteira
+        'noplaylist': True,
     }
-    
-    # Se tiver proxy, injeta na configuração
-    if proxy_url:
-        ydl_opts['proxy'] = proxy_url
 
+    # --- TENTATIVA 1: COM PROXY (AUTO) ---
+    if proxy_url:
+        try:
+            st.info("🔄 Tentando download via Proxy Apify (Auto)...")
+            ydl_opts['proxy'] = proxy_url
+            
+            with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+                ydl.download([url])
+            
+            final_filename = f"{output_filename}.mp3"
+            if os.path.exists(final_filename):
+                return final_filename
+                
+        except Exception as e:
+            st.warning(f"⚠️ Proxy falhou ({e}). Tentando conexão direta...")
+
+    # --- TENTATIVA 2: CONEXÃO DIRETA (FALLBACK) ---
+    # Se o proxy falhar (ou não existir), tenta baixar direto
+    # Adicionamos headers de navegador para tentar passar pelo bloqueio 403
     try:
-        st.info(f"🔄 Baixando áudio... (Proxy: {'Ativado' if proxy_url else 'Desativado'})")
-        
+        if 'proxy' in ydl_opts:
+            del ydl_opts['proxy'] # Remove o proxy que falhou
+            
+        # Headers para "fingir" ser um navegador real
+        ydl_opts['http_headers'] = {
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/123.0.0.0 Safari/537.36',
+            'Accept-Language': 'en-US,en;q=0.9',
+            'Referer': 'https://www.youtube.com/',
+        }
+            
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
             ydl.download([url])
-        
-        # O yt-dlp adiciona a extensão .mp3 automaticamente após a conversão
+            
         final_filename = f"{output_filename}.mp3"
-        
         if os.path.exists(final_filename):
             return final_filename
             
         return None
 
     except Exception as e:
-        st.error(f"Erro no download (YouTube bloqueou ou link inválido): {e}")
+        st.error(f"❌ Falha total no download: {e}")
         return None
 
 def download_file(url, filename):
