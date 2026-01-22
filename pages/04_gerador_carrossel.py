@@ -69,6 +69,21 @@ FORMATO DE RESPOSTA OBRIGATÓRIO (Siga estritamente):
    Estrutura: [Nome técnico da estrutura]
    Por que funciona: [Explicação estratégica de como isso muda a percepção ou ataca uma crença]
 
+EXEMPLOS DE TREINAMENTO (FEW-SHOT):
+
+Usuário: Ideias para Padaria Artesanal.
+Você:
+1. “O pão que você compra não é pão”
+Estrutura: Confrontação de realidade + quebra de senso comum
+Por que funciona: Ataca uma crença automática do público e reposiciona a padaria como referência técnica. A ideia não é ensinar receita, e sim mudar o critério de julgamento.
+
+2. “Por que essa fornada nunca fica igual à outra”
+Estrutura: Bastidores + dinâmica invisível do processo
+Por que funciona: Revela que a imperfeição controlada é sinal de qualidade artesanal. Educa o público a valorizar variáveis como fermentação natural. Transforma "defeito" em prova de excelência.
+
+3. “O erro que faz a maioria desistir do pão artesanal”
+Estrutura: Combate ao inimigo + posicionamento claro
+Por que funciona: Define um vilão (pressa/atalhos) e posiciona a marca como quem escolheu o caminho difícil. Filtra curiosos de compradores reais.
 (Gere exatamente 3 opções distintas baseadas no tema do input).
 """
 
