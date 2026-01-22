@@ -129,20 +129,20 @@ def download_youtube_audio(url):
 def get_instagram_data_apify(url):
     """
     Usa Apify para pegar dados do post (Reels ou Carrossel).
-    Esta função estava faltando no seu código anterior.
+    CORREÇÃO: Removido 'searchType' que estava causando erro de validação.
     """
+    # Configuração correta para Links Diretos (Direct URLs)
     run_input = {
         "directUrls": [url],
         "resultsType": "posts",
-        "searchType": "url",
+        # "searchType": "url",  <-- REMOVIDO (Isso causava o erro)
         "proxy": {
             "useApifyProxy": True,
             "apifyProxyGroups": ["RESIDENTIAL"]
         }
     }
     
-    # Se não tiver proxy residencial pago, usamos o 'AUTO' ou removemos o proxy
-    # Ajuste para contas free:
+    # Ajuste de Proxy para contas Free (Se der erro 407, descomente a linha abaixo)
     # run_input["proxy"] = {"useApifyProxy": True, "apifyProxyGroups": []} 
     
     try:
