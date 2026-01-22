@@ -79,49 +79,64 @@ Por que funciona: Define um vilão (pressa/atalhos) e posiciona a marca como que
 # --- FUNÇÕES AUXILIARES ---
 
 def download_youtube_audio(url):
-    """Baixa áudio do YouTube usando yt_dlp com Headers anti-bloqueio"""
-    output_filename = "temp_yt_audio"
+    """
+    PLANO B: Baixa áudio do YouTube usando a APIFY (Bypass de IP Block).
+    Usa o Actor 'streampot/youtube-mp3-downloader' que é específico para isso.
+    """
+    output_filename = "temp_yt_audio.mp3"
     
-    # Opções robustas para evitar erro 403
-    ydl_opts = {
-        'format': 'bestaudio/best',
-        'outtmpl': output_filename,
-        'postprocessors': [{
-            'key': 'FFmpegExtractAudio',
-            'preferredcodec': 'mp3',
-            'preferredquality': '192',
-        }],
-        'quiet': True,
-        'no_warnings': True,
-        'nocheckcertificate': True,
-        # AQUI ESTÁ O SEGREDO (Imita um navegador):
-        'http_headers': {
-            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/123.0.0.0 Safari/537.36',
-            'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
-            'Accept-Language': 'en-us,en;q=0.5',
-            'Sec-Fetch-Mode': 'navigate',
-        }
-    }
-    
-    try:
-        # Tenta baixar
-        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-            ydl.download([url])
-        
-        # O yt-dlp pode adicionar a extensão .mp3 automaticamente
-        if os.path.exists(f"{output_filename}.mp3"):
-            return f"{output_filename}.mp3"
-        elif os.path.exists(output_filename):
-            return output_filename
-        else:
-            # Caso raro onde ele salva com outro nome, tentamos achar
-            files = [f for f in os.listdir('.') if f.startswith("temp_yt_audio")]
-            if files: return files[0]
-            
+    # Verifica se o token existe
+    if "apify_token" not in st.secrets:
+        st.error("Token da Apify não configurado no secrets.toml")
         return None
 
+    client = ApifyClient(st.secrets["apify_token"])
+    
+    st.info("🔄 Delegando download para Apify (Evita bloqueio 403)...")
+    
+    # Configuração do Actor (StreamPot - YouTube MP3)
+    run_input = {
+        "startUrls": [{"url": url}],
+        "quality": "low", # Baixa qualidade pois só queremos transcrever (economiza dados)
+    }
+
+    try:
+        # Chama o Actor na nuvem
+        # Nota: streamport/youtube-mp3-downloader é um actor comum para isso. 
+        # Se ele falhar, podemos usar 'apify/youtube-downloader' e extrair o audio depois.
+        run = client.actor("streampot/youtube-mp3-downloader").call(run_input=run_input)
+        
+        if not run:
+            st.error("Apify não retornou execução.")
+            return None
+
+        # Pega o resultado
+        dataset_items = client.dataset(run["defaultDatasetId"]).list_items().items
+        
+        if not dataset_items:
+            st.error("Apify finalizou mas não retornou o link do áudio.")
+            return None
+            
+        # O resultado geralmente contém um 'downloadUrl' ou 'url' do arquivo mp3
+        item = dataset_items[0]
+        download_url = item.get("downloadUrl") or item.get("url") or item.get("link")
+        
+        if not download_url:
+            st.error("Link de download não encontrado no resultado da Apify.")
+            return None
+            
+        # Baixa o arquivo MP3 gerado pela Apify para o Streamlit
+        response = requests.get(download_url, stream=True)
+        response.raise_for_status()
+        
+        with open(output_filename, 'wb') as f:
+            for chunk in response.iter_content(chunk_size=8192):
+                f.write(chunk)
+                
+        return output_filename
+
     except Exception as e:
-        st.error(f"Erro no download do YouTube (Tente outro link ou vídeo mais curto): {e}")
+        st.error(f"Erro na integração Apify Youtube: {e}")
         return None
 
 def download_file(url, filename):
