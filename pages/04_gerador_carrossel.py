@@ -79,8 +79,10 @@ Por que funciona: Define um vilão (pressa/atalhos) e posiciona a marca como que
 # --- FUNÇÕES AUXILIARES ---
 
 def download_youtube_audio(url):
-    """Baixa áudio do YouTube usando yt_dlp"""
+    """Baixa áudio do YouTube usando yt_dlp com Headers anti-bloqueio"""
     output_filename = "temp_yt_audio"
+    
+    # Opções robustas para evitar erro 403
     ydl_opts = {
         'format': 'bestaudio/best',
         'outtmpl': output_filename,
@@ -91,38 +93,35 @@ def download_youtube_audio(url):
         }],
         'quiet': True,
         'no_warnings': True,
-    }
-    
-    try:
-        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-            ydl.download([url])
-        return f"{output_filename}.mp3"
-    except Exception as e:
-        st.error(f"Erro no download do YouTube: {e}")
-        return None
-
-def get_instagram_data_apify(url):
-    """Usa Apify para pegar dados do post (Reels ou Carrossel)"""
-    run_input = {
-        "directUrls": [url],
-        "resultsType": "posts",
-        "searchType": "url",
-        "proxy": {
-            "useApifyProxy": True,
-            "apifyProxyGroups": ["RESIDENTIAL"]
+        'nocheckcertificate': True,
+        # AQUI ESTÁ O SEGREDO (Imita um navegador):
+        'http_headers': {
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/123.0.0.0 Safari/537.36',
+            'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+            'Accept-Language': 'en-us,en;q=0.5',
+            'Sec-Fetch-Mode': 'navigate',
         }
     }
     
     try:
-        run = client_apify.actor("apify/instagram-scraper").call(run_input=run_input)
-        if not run: return None
+        # Tenta baixar
+        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+            ydl.download([url])
         
-        dataset_items = client_apify.dataset(run["defaultDatasetId"]).list_items().items
-        if dataset_items:
-            return dataset_items[0]
+        # O yt-dlp pode adicionar a extensão .mp3 automaticamente
+        if os.path.exists(f"{output_filename}.mp3"):
+            return f"{output_filename}.mp3"
+        elif os.path.exists(output_filename):
+            return output_filename
+        else:
+            # Caso raro onde ele salva com outro nome, tentamos achar
+            files = [f for f in os.listdir('.') if f.startswith("temp_yt_audio")]
+            if files: return files[0]
+            
         return None
+
     except Exception as e:
-        st.error(f"Erro na Apify: {e}")
+        st.error(f"Erro no download do YouTube (Tente outro link ou vídeo mais curto): {e}")
         return None
 
 def download_file(url, filename):
