@@ -12,7 +12,7 @@ from moviepy.editor import VideoFileClip
 st.set_page_config(page_title="Gerador de Carrosséis", page_icon="🎠", layout="wide")
 
 st.title("🎠 Gerador de Carrosséis: Método Tempestade")
-st.markdown("Transforme qualquer conteúdo (YouTube, Reels ou Post) em 3 estruturas validadas psicologicamente.")
+st.markdown("Transforme qualquer conteúdo (YouTube, Reels ou Post) em estruturas validadas.")
 st.markdown("---")
 
 # --- LOGIN ---
@@ -35,7 +35,6 @@ if not check_password():
 
 # --- CONFIGURAÇÕES DE API ---
 try:
-    # Ajuste para ler do bloco [groq] conforme seu secrets.toml
     if "groq" in st.secrets and "api_key" in st.secrets["groq"]:
         client_groq = Groq(api_key=st.secrets["groq"]["api_key"])
     else:
@@ -47,27 +46,24 @@ try:
     else:
         st.error("Token Apify não encontrado.")
         st.stop()
-
 except Exception as e:
     st.error(f"Erro de configuração de chaves: {e}")
     st.stop()
 
-# --- PROMPT DO AGENTE TEMPESTADE ---
-SYSTEM_PROMPT_TEMPESTADE = """
-VOCÊ É: Um Estrategista de Conteúdo Viral e Analista de Atenção (Focado 100% em Ideias e Conceitos).
+# ==========================================
+# PROMPTS DE INTELIGÊNCIA (O CÉREBRO)
+# ==========================================
 
-SUA MISSÃO: Gerar estruturas de conteúdo validadas psicologicamente baseadas no CONTEÚDO BASE fornecido.
+# 1. PROMPT PARA GERAR AS IDEIAS (JSON)
+SYSTEM_PROMPT_TEMPESTADE = """
+VOCÊ É: Um Estrategista de Conteúdo Viral e Analista de Atenção.
+SUA MISSÃO: Analisar o CONTEÚDO BASE e Gerar estruturas de conteúdo validadas psicologicamente.
 O QUE VOCÊ NÃO FAZ: Você NÃO escreve roteiros, NÃO escreve legendas, NÃO escreve copy final. Você entrega a ESTRUTURA.
 
 TOM DE VOZ:
 - Analítico, cirúrgico e "Sênior".
 - Foco em: "Por que isso funciona?" (Psicologia do consumidor).
 - Zero "encher linguiça". Vá direto à estrutura.
-
-FORMATO DE RESPOSTA OBRIGATÓRIO (Siga estritamente):
-1. "Título do Conceito"
-   Estrutura: [Nome técnico da estrutura]
-   Por que funciona: [Explicação estratégica de como isso muda a percepção ou ataca uma crença]
 
 EXEMPLOS DE TREINAMENTO (FEW-SHOT):
 
@@ -84,116 +80,115 @@ Por que funciona: Revela que a imperfeição controlada é sinal de qualidade ar
 3. “O erro que faz a maioria desistir do pão artesanal”
 Estrutura: Combate ao inimigo + posicionamento claro
 Por que funciona: Define um vilão (pressa/atalhos) e posiciona a marca como quem escolheu o caminho difícil. Filtra curiosos de compradores reais.
-(Gere exatamente 3 opções distintas baseadas no tema do input).
+
+FORMATO DE RESPOSTA (JSON ESTRITO):
+Você deve retornar APENAS um JSON válido contendo um array de objetos. 
+Não use Markdown. Não escreva nada antes ou depois do JSON.
+
+Estrutura obrigatória:
+[
+  {
+    "titulo": "Título Curto e Impactante",
+    "estrutura": "Nome técnico da estrutura (ex: Quebra de Padrão, Lista Invertida)",
+    "por_que_funciona": "Explicação estratégica de como isso muda a percepção ou ataca uma crença"
+  },
+  ... (total de 3 itens)
+]
+"""
+
+# 2. PROMPT PARA ESCREVER O CARROSSEL (SEU NOVO PROMPT)
+SYSTEM_PROMPT_ARQUITETO = """
+VOCÊ É: Um Arquiteto de Narrativas Virais e Especialista em Psicologia da Atenção.
+
+SEU OBJETIVO: Criar estruturas de conteúdo que retenham a atenção através de tensão cognitiva, quebra de padrão e lógica estrutural.
+
+REGRA DE OURO (MANDATÓRIA):
+Para cada bloco de conteúdo que você criar (seja um Painel/Slide), você deve incluir uma "NOTA DE ENGENHARIA".
+Nesta nota, você deve explicar tecnicamente qual gatilho psicológico usou (ex: Paradoxo, Ataque a Crença, Substituição de Herói, Tensão Latente).
+
+TOM DE VOZ:
+- Analítico e Sênior.
+- Não use exclamações desnecessárias.
+- Não seja "motivacional". Seja estratégico.
+
+ESTRUTURA DE SAÍDA (MARKDOWN):
+Painel 1 — Capa (Gancho)
+Texto: "..."
+Nota de Engenharia: ...
+
+Painel 2 — ...
+...
 """
 
 # --- FUNÇÕES AUXILIARES ---
 
+def limpar_json(texto):
+    """Limpa formatação markdown que a IA possa colocar no JSON"""
+    texto = texto.replace("```json", "").replace("```", "")
+    start = texto.find("[")
+    end = texto.rfind("]") + 1
+    if start != -1 and end != -1:
+        return texto[start:end]
+    return texto
+
 def download_youtube_audio(url):
-    """
-    Baixa áudio do YouTube usando yt-dlp simulando um CLIENTE ANDROID.
-    Isso ajuda a evitar o erro 403 em servidores de nuvem sem usar Proxy.
-    """
+    """Baixa áudio do YouTube usando yt-dlp (Modo Android)"""
     output_filename = "temp_yt_audio"
-    
     ydl_opts = {
         'format': 'bestaudio/best',
         'outtmpl': output_filename,
-        # O SEGREDO: Força o yt-dlp a agir como um App Android
-        'extractor_args': {
-            'youtube': {
-                'player_client': ['android', 'ios'],
-            }
-        },
-        'postprocessors': [{
-            'key': 'FFmpegExtractAudio',
-            'preferredcodec': 'mp3',
-            'preferredquality': '192',
-        }],
-        'quiet': True,
-        'no_warnings': True,
-        'nocheckcertificate': True,
-        'noplaylist': True,
+        'extractor_args': {'youtube': {'player_client': ['android', 'ios']}},
+        'postprocessors': [{'key': 'FFmpegExtractAudio','preferredcodec': 'mp3','preferredquality': '192'}],
+        'quiet': True, 'no_warnings': True, 'nocheckcertificate': True, 'noplaylist': True,
     }
-
     try:
-        # Tenta modo Android
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
             ydl.download([url])
-        
         final_filename = f"{output_filename}.mp3"
-        if os.path.exists(final_filename):
-            return final_filename
-        if os.path.exists(output_filename):
-            return output_filename
-            
+        if os.path.exists(final_filename): return final_filename
+        if os.path.exists(output_filename): return output_filename
         return None
-
     except Exception as e:
-        st.warning(f"Método Android falhou ({e}). Tentando método Web Creator...")
+        st.warning(f"Método Android falhou. Tentando Web Creator...")
         try:
-            # Tenta modo Web Creator como fallback
             ydl_opts['extractor_args']['youtube']['player_client'] = ['web_creator']
-            with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-                ydl.download([url])
+            with yt_dlp.YoutubeDL(ydl_opts) as ydl: ydl.download([url])
             return f"{output_filename}.mp3"
         except Exception as e2:
             st.error(f"❌ Falha no download do YouTube: {e2}")
             return None
 
 def get_instagram_data_apify(url):
-    """
-    Usa Apify para pegar dados do post (Reels ou Carrossel).
-    CORREÇÃO: Removido 'searchType' que estava causando erro de validação.
-    """
-    # Configuração correta para Links Diretos (Direct URLs)
+    """Usa Apify para pegar dados do post (Sem searchType)"""
     run_input = {
         "directUrls": [url],
         "resultsType": "posts",
-        # "searchType": "url",  <-- REMOVIDO (Isso causava o erro)
-        "proxy": {
-            "useApifyProxy": True,
-            "apifyProxyGroups": ["RESIDENTIAL"]
-        }
+        "proxy": {"useApifyProxy": True, "apifyProxyGroups": ["RESIDENTIAL"]}
     }
-    
-    # Ajuste de Proxy para contas Free (Se der erro 407, descomente a linha abaixo)
-    # run_input["proxy"] = {"useApifyProxy": True, "apifyProxyGroups": []} 
-    
+    # run_input["proxy"] = {"useApifyProxy": True, "apifyProxyGroups": []} # Descomente se for conta Free
     try:
-        # Chama o Actor "instagram-scraper"
         run = client_apify.actor("apify/instagram-scraper").call(run_input=run_input)
-        
-        if not run: 
-            return None
-        
-        # Pega os resultados do dataset
+        if not run: return None
         dataset_items = client_apify.dataset(run["defaultDatasetId"]).list_items().items
-        
-        if dataset_items:
-            return dataset_items[0]
-            
+        if dataset_items: return dataset_items[0]
         return None
     except Exception as e:
         st.error(f"Erro na Apify: {e}")
         return None
 
 def download_file(url, filename):
-    """Baixa arquivo de uma URL genérica (para vídeo do Instagram)"""
     try:
         headers = {"User-Agent": "Mozilla/5.0"}
-        response = requests.get(url, headers=headers, stream=True)
-        response.raise_for_status()
+        r = requests.get(url, headers=headers, stream=True)
+        r.raise_for_status()
         with open(filename, 'wb') as f:
-            for chunk in response.iter_content(chunk_size=8192):
-                f.write(chunk)
+            for chunk in r.iter_content(chunk_size=8192): f.write(chunk)
         return True
     except Exception as e:
-        st.error(f"Erro ao baixar arquivo: {e}")
+        st.error(f"Erro download arquivo: {e}")
         return False
 
 def transcrever_audio_groq(filepath):
-    """Transcreve usando Whisper V3 na Groq"""
     try:
         with open(filepath, "rb") as file:
             transcription = client_groq.audio.transcriptions.create(
@@ -206,116 +201,157 @@ def transcrever_audio_groq(filepath):
         st.error(f"Erro na Transcrição: {e}")
         return None
 
-def agente_tempestade(conteudo_base):
-    """Envia o conteúdo para o Llama 3 gerar as estruturas"""
+# --- AGENTES DE IA ---
+
+def agente_tempestade_ideias(conteudo_base):
+    """Gera 3 ideias em JSON"""
     try:
-        prompt_user = f"Analise este conteúdo e gere 3 estruturas de carrossel:\n\nCONTEÚDO BASE:\n{conteudo_base[:6000]}"
-        
+        prompt_user = f"Analise este conteúdo e gere 3 conceitos:\n\nCONTEÚDO BASE:\n{conteudo_base[:6000]}"
         completion = client_groq.chat.completions.create(
             messages=[
                 {"role": "system", "content": SYSTEM_PROMPT_TEMPESTADE},
                 {"role": "user", "content": prompt_user}
             ],
-            model="llama-3.3-70b-versatile", # Ajustado para modelo disponível
+            model="llama-3.3-70b-versatile",
             temperature=0.5,
         )
-        return completion.choices[0].message.content
+        texto_limpo = limpar_json(completion.choices[0].message.content)
+        return json.loads(texto_limpo)
     except Exception as e:
         st.error(f"Erro na IA Tempestade: {e}")
         return None
 
+def agente_arquiteto_carrossel(ideia_escolhida, conteudo_base):
+    """Escreve o roteiro detalhado com notas de engenharia"""
+    try:
+        prompt_user = f"""
+        CONTEÚDO ORIGINAL DE BASE:
+        "{conteudo_base[:3000]}"
+        
+        CONCEITO ESCOLHIDO PARA O CARROSSEL:
+        Título: {ideia_escolhida['titulo']}
+        Estrutura: {ideia_escolhida['estrutura']}
+        Lógica: {ideia_escolhida['por_que_funciona']}
+        
+        Tarefa: Escreva o roteiro slide por slide seguindo suas instruções de engenharia.
+        """
+        
+        completion = client_groq.chat.completions.create(
+            messages=[
+                {"role": "system", "content": SYSTEM_PROMPT_ARQUITETO},
+                {"role": "user", "content": prompt_user}
+            ],
+            model="llama-3.3-70b-versatile",
+            temperature=0.6,
+        )
+        return completion.choices[0].message.content
+    except Exception as e:
+        return f"Erro ao gerar carrossel: {e}"
+
 # --- INTERFACE PRINCIPAL ---
 
-tipo_conteudo = st.radio(
-    "Qual a origem da ideia?",
-    ["YouTube", "Reels (Instagram)", "Carrossel (Instagram)"],
-    horizontal=True
-)
-
+tipo_conteudo = st.radio("Qual a origem da ideia?", ["YouTube", "Reels (Instagram)", "Carrossel (Instagram)"], horizontal=True)
 url_input = st.text_input(f"Cole o link do {tipo_conteudo}:", placeholder="https://...")
 
-if st.button("⚡ Gerar Tempestade de Ideias", type="primary"):
+# Botão Principal (Gera as Ideias)
+if st.button("⚡ Analisar e Gerar Conceitos", type="primary"):
     if not url_input:
-        st.warning("Por favor, insira um link.")
+        st.warning("Insira um link.")
     else:
-        texto_para_analise = ""
-        status = st.status("Processando...", expanded=True)
+        st.session_state['conteudo_base'] = None # Limpa anterior
+        st.session_state['ideias_geradas'] = None
         
-        # --- FLUXO 1: YOUTUBE ---
+        status = st.status("Processando conteúdo...", expanded=True)
+        texto_extraido = ""
+
+        # LÓGICA DE EXTRAÇÃO (IGUAL AO ANTERIOR)
         if tipo_conteudo == "YouTube":
-            status.write("⬇️ Baixando áudio do YouTube...")
-            audio_file = download_youtube_audio(url_input)
-            
-            if audio_file:
-                status.write("👂 Transcrevendo áudio...")
-                texto_para_analise = transcrever_audio_groq(audio_file)
-                
-                # Limpeza
-                if os.path.exists(audio_file): os.remove(audio_file)
+            status.write("⬇️ Baixando YouTube...")
+            f = download_youtube_audio(url_input)
+            if f:
+                status.write("👂 Transcrevendo...")
+                texto_extraido = transcrever_audio_groq(f)
+                if os.path.exists(f): os.remove(f)
 
-        # --- FLUXO 2: REELS ---
         elif tipo_conteudo == "Reels (Instagram)":
-            status.write("🕵️ Acessando Instagram via Apify...")
-            # AQUI ESTAVA O ERRO: Chamando a função agora definida
-            post_data = get_instagram_data_apify(url_input)
-            
-            if post_data and (post_data.get('videoUrl') or post_data.get('video_url')):
-                video_url = post_data.get('videoUrl') or post_data.get('video_url')
-                
-                status.write("⬇️ Baixando vídeo...")
-                if download_file(video_url, "temp_reel.mp4"):
-                    
-                    status.write("🔊 Extraindo áudio...")
+            status.write("🕵️ Acessando Reels...")
+            data = get_instagram_data_apify(url_input)
+            if data and (data.get('videoUrl') or data.get('video_url')):
+                v_url = data.get('videoUrl') or data.get('video_url')
+                if download_file(v_url, "temp.mp4"):
                     try:
-                        video_clip = VideoFileClip("temp_reel.mp4")
-                        video_clip.audio.write_audiofile("temp_reel.mp3", verbose=False, logger=None)
-                        video_clip.close()
-                        
+                        vc = VideoFileClip("temp.mp4")
+                        vc.audio.write_audiofile("temp.mp3", verbose=False, logger=None)
+                        vc.close()
                         status.write("👂 Transcrevendo...")
-                        texto_para_analise = transcrever_audio_groq("temp_reel.mp3")
-                        
-                        # Cleanup
-                        if os.path.exists("temp_reel.mp4"): os.remove("temp_reel.mp4")
-                        if os.path.exists("temp_reel.mp3"): os.remove("temp_reel.mp3")
-                        
-                    except Exception as e:
-                        st.error(f"Erro processando vídeo: {e}")
-            else:
-                st.error("Não foi possível encontrar o vídeo neste link ou erro na Apify.")
+                        texto_extraido = transcrever_audio_groq("temp.mp3")
+                    except: st.error("Erro processamento vídeo")
+                    finally:
+                        if os.path.exists("temp.mp4"): os.remove("temp.mp4")
+                        if os.path.exists("temp.mp3"): os.remove("temp.mp3")
 
-        # --- FLUXO 3: CARROSSEL ---
         elif tipo_conteudo == "Carrossel (Instagram)":
-            status.write("🕵️ Acessando Carrossel via Apify...")
-            post_data = get_instagram_data_apify(url_input)
-            
-            if post_data:
-                # Estratégia: Pegar a legenda e textos alternativos (se houver)
-                caption = post_data.get('caption') or post_data.get('description') or ""
-                
-                # Tenta pegar alt text das imagens filhas
-                alt_texts = []
-                children = post_data.get('childPosts') or post_data.get('children') or []
-                for child in children:
-                    if child.get('alt'):
-                        alt_texts.append(child.get('alt'))
-                
-                texto_para_analise = f"LEGENDA DO POST:\n{caption}\n\nCONTEXTO VISUAL (Alt Text):\n{' '.join(alt_texts)}"
-                
-                status.write("✅ Texto extraído da legenda e metadados.")
-            else:
-                st.error("Não foi possível ler o carrossel.")
+            status.write("🕵️ Lendo Carrossel...")
+            data = get_instagram_data_apify(url_input)
+            if data:
+                cap = data.get('caption') or ""
+                alts = [c.get('alt') for c in (data.get('childPosts') or []) if c.get('alt')]
+                texto_extraido = f"LEGENDA:\n{cap}\nVISUAL:\n{' '.join(alts)}"
 
-        # --- GERAÇÃO FINAL ---
-        if texto_para_analise:
-            status.write("🧠 Agente Tempestade trabalhando...")
-            resultado = agente_tempestade(texto_para_analise)
+        # SE EXTRAIU COM SUCESSO, GERA AS IDEIAS
+        if texto_extraido:
+            st.session_state['conteudo_base'] = texto_extraido
+            status.write("🧠 Gerando conceitos estruturais...")
+            ideias = agente_tempestade_ideias(texto_extraido)
             
-            status.update(label="Concluído!", state="complete", expanded=False)
-            
-            if resultado:
-                st.subheader("⛈️ Estruturas Geradas")
-                st.markdown(resultado)
-                st.code(resultado, language="markdown")
+            if ideias:
+                st.session_state['ideias_geradas'] = ideias
+                status.update(label="Conceitos Prontos!", state="complete", expanded=False)
+            else:
+                status.update(label="Erro na IA", state="error")
         else:
-            status.update(label="Falha no processamento", state="error")
-            st.error("Não foi possível extrair conteúdo suficiente para análise.")
+            status.update(label="Falha na extração", state="error")
+
+# --- EXIBIÇÃO DAS IDEIAS E GERAÇÃO DE CARROSSEL ---
+if 'ideias_geradas' in st.session_state and st.session_state['ideias_geradas']:
+    st.markdown("---")
+    st.subheader("⛈️ Estruturas Identificadas")
+    
+    ideias = st.session_state['ideias_geradas']
+    
+    # Loop para exibir os cartões
+    for i, ideia in enumerate(ideias):
+        with st.container(border=True):
+            col_txt, col_btn = st.columns([4, 1])
+            
+            with col_txt:
+                st.markdown(f"### {i+1}. {ideia['titulo']}")
+                st.caption(f"📐 **Estrutura:** {ideia['estrutura']}")
+                st.write(f"💡 *{ideia['por_que_funciona']}*")
+            
+            with col_btn:
+                st.write("")
+                st.write("")
+                # Botão único para cada ideia
+                if st.button("🎨 Gerar Carrossel", key=f"btn_car_{i}"):
+                    st.session_state['ideia_ativa'] = ideia
+                    st.rerun()
+
+# --- EXIBIÇÃO DO ROTEIRO FINAL ---
+if 'ideia_ativa' in st.session_state:
+    st.markdown("---")
+    st.info(f"🏗️ Projetando Carrossel: **{st.session_state['ideia_ativa']['titulo']}**")
+    
+    with st.spinner("O Arquiteto está desenhando os slides..."):
+        roteiro = agente_arquiteto_carrossel(
+            st.session_state['ideia_ativa'], 
+            st.session_state.get('conteudo_base', '')
+        )
+        
+        st.success("Projeto Finalizado!")
+        with st.container(border=True):
+            st.markdown(roteiro)
+            
+    if st.button("Fechar Projeto"):
+        del st.session_state['ideia_ativa']
+        st.rerun()
