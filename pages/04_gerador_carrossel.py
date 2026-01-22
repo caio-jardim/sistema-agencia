@@ -80,26 +80,24 @@ Por que funciona: Define um vilão (pressa/atalhos) e posiciona a marca como que
 
 def download_youtube_audio(url):
     """
-    Baixa áudio do YouTube usando yt_dlp + PROXY DA APIFY.
-    Isso mascara o IP do Streamlit e evita o erro 403.
+    Baixa áudio do YouTube usando yt_dlp + Proxy Residencial (Apify)
+    para evitar bloqueio 403 no Streamlit Cloud.
     """
-    output_filename = "temp_yt_audio"
+    output_filename = "temp_yt_audio" # Nome fixo para facilitar
     
-    # Monta a URL do Proxy da Apify
-    # Se você tiver acesso a proxies residenciais (pagos), use 'groups-RESIDENTIAL'
-    # Se for conta gratuita, tente 'auto' (mas o YouTube bloqueia datacenters com frequência)
+    # 1. Configura o Proxy (O Segredo para funcionar na Nuvem)
     if "apify_token" in st.secrets:
         token = st.secrets["apify_token"]
-        # Tenta usar proxy residencial para garantir que não seja bloqueado
+        # Tenta proxy residencial (menos chance de bloqueio)
         proxy_url = f"http://groups-RESIDENTIAL:{token}@proxy.apify.com:8000"
     else:
-        st.error("Token da Apify não encontrado para configurar o Proxy.")
-        return None
+        st.warning("⚠️ Token Apify não achado. Tentando sem proxy (pode dar erro 403)...")
+        proxy_url = None
 
+    # 2. Suas configurações originais (adaptadas)
     ydl_opts = {
         'format': 'bestaudio/best',
         'outtmpl': output_filename,
-        'proxy': proxy_url,  # <--- O PULO DO GATO ESTÁ AQUI
         'postprocessors': [{
             'key': 'FFmpegExtractAudio',
             'preferredcodec': 'mp3',
@@ -108,35 +106,30 @@ def download_youtube_audio(url):
         'quiet': True,
         'no_warnings': True,
         'nocheckcertificate': True,
+        'noplaylist': True, # Garante que baixa só o vídeo, não a playlist inteira
     }
     
+    # Se tiver proxy, injeta na configuração
+    if proxy_url:
+        ydl_opts['proxy'] = proxy_url
+
     try:
-        st.info("🔄 Baixando via Proxy Residencial da Apify...")
+        st.info(f"🔄 Baixando áudio... (Proxy: {'Ativado' if proxy_url else 'Desativado'})")
+        
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
             ydl.download([url])
         
-        # Verifica se o arquivo foi criado (yt-dlp adiciona .mp3 automaticamente)
-        if os.path.exists(f"{output_filename}.mp3"):
-            return f"{output_filename}.mp3"
-        elif os.path.exists(output_filename):
-            return output_filename
+        # O yt-dlp adiciona a extensão .mp3 automaticamente após a conversão
+        final_filename = f"{output_filename}.mp3"
+        
+        if os.path.exists(final_filename):
+            return final_filename
             
         return None
 
     except Exception as e:
-        # Se der erro de Proxy (ex: 407 ou conexão), pode ser que a conta Apify não tenha Residential
-        st.warning(f"Tentativa com Proxy Residencial falhou: {e}")
-        st.info("Tentando fallback sem proxy (pode dar 403)...")
-        
-        # Tenta sem proxy como última esperança
-        try:
-            del ydl_opts['proxy']
-            with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-                ydl.download([url])
-            return f"{output_filename}.mp3"
-        except Exception as e2:
-            st.error(f"Erro final no download: {e2}")
-            return None
+        st.error(f"Erro no download (YouTube bloqueou ou link inválido): {e}")
+        return None
 
 def download_file(url, filename):
     """Baixa arquivo de uma URL genérica"""
