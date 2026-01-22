@@ -97,6 +97,7 @@ Estrutura obrigatória:
 """
 
 # 2. PROMPT PARA ESCREVER O CARROSSEL (SEU NOVO PROMPT)
+# 2. PROMPT ARQUITETO (AGORA EM JSON E OTIMIZADO)
 SYSTEM_PROMPT_ARQUITETO = """
 VOCÊ É: Um Engenheiro de Atenção e Estrategista de Narrativas (Nível Sênior).
 Sua especialidade é criar roteiros de carrossel que geram "Stop Scroll" imediato.
@@ -115,47 +116,22 @@ Ao escrever a "Nota de Engenharia", você deve escolher um destes conceitos:
 2. TOM ÁCIDO: Seja direto. Corte palavras de transição ("no entanto", "todavia").
 3. ZERO OBVIEDADE: Se a frase parece algo que um "Coach" diria, apague e escreva o oposto.
 
-## O QUE VOCÊ NÃO DEVE FAZER:
-- NÃO use emojis no meio do texto (apenas bullet points ou início).
-- NÃO dê boas vindas ("Aqui está seu carrossel").
-- NÃO explique o óbvio.
-- NÃO seja educado demais.
+## FORMATO DE SAÍDA (JSON OBRIGATÓRIO):
+Você deve retornar APENAS um objeto JSON com a lista de slides.
+Não use Markdown. Não escreva nada antes ou depois do JSON.
 
-## EXEMPLO DE TREINAMENTO (FEW-SHOT):
-
-Usuário: Tema "Disciplina é superestimada"
-Você:
-Painel 1 (Gancho)
-Texto: "Por que a disciplina é superestimada"
-Nota de Engenharia: [Ataque a Crença] Disciplina é um valor sagrado. Questioná-lo gera atrito cognitivo imediato.
-
-Painel 2 (Tensão)
-Texto: "A internet te prometeu que basta acordar às 5am.
-O problema? Isso funciona.
-Até o dia que você quebra."
-Nota de Engenharia: [Tensão Latente] Uso validação inicial seguida de ameaça imediata.
-
-Painel 3 (Paradoxo)
-Texto: "Disciplina é um recurso escasso. A bateria acaba.
-Se fosse a chave do sucesso, os disciplinados não teriam Burnout.
-Mas eles têm."
-Nota de Engenharia: [Paradoxo Lógico] Uso raciocínio simples: se A fosse absoluto, B não aconteceria.
-
-Painel 4 (Virada)
-Texto: "O segredo não é força de vontade. É Ambiente.
-Disciplina gasta energia.
-Ambiente poupa energia."
-Nota de Engenharia: [Substituição de Herói] Tiro a disciplina do pedestal e apresento a nova solução (Ambiente).
-
-Painel 5 (Fechamento)
-Texto: "Pare de tentar ser mais forte.
-Comece a ser mais estratégico.
-O que você precisa eliminar hoje para não precisar de disciplina amanhã?"
-Nota de Engenharia: [Pergunta de Retenção] Inverto o foco para gerar salvamentos.
-
----
-AGORA É SUA VEZ.
-Mantenha a estrutura exata acima. Seja breve. Seja impactante.
+Estrutura JSON:
+{
+  "carrossel": [
+    {
+      "painel": 1,
+      "fase": "Gancho",
+      "texto": "Texto do slide aqui...",
+      "nota_engenharia": "[Gatilho] Explicação técnica..."
+    },
+    ...
+  ]
+}
 """
 
 # --- FUNÇÕES AUXILIARES ---
@@ -163,8 +139,14 @@ Mantenha a estrutura exata acima. Seja breve. Seja impactante.
 def limpar_json(texto):
     """Limpa formatação markdown que a IA possa colocar no JSON"""
     texto = texto.replace("```json", "").replace("```", "")
-    start = texto.find("[")
-    end = texto.rfind("]") + 1
+    start = texto.find("{") # Procura chaves (objeto)
+    if start == -1: start = texto.find("[") # Ou colchetes (array)
+    
+    # Procura o final
+    end_obj = texto.rfind("}")
+    end_arr = texto.rfind("]")
+    end = max(end_obj, end_arr) + 1
+    
     if start != -1 and end != -1:
         return texto[start:end]
     return texto
@@ -203,7 +185,7 @@ def get_instagram_data_apify(url):
         "resultsType": "posts",
         "proxy": {"useApifyProxy": True, "apifyProxyGroups": ["RESIDENTIAL"]}
     }
-    # run_input["proxy"] = {"useApifyProxy": True, "apifyProxyGroups": []} # Descomente se for conta Free
+    # run_input["proxy"] = {"useApifyProxy": True, "apifyProxyGroups": []} 
     try:
         run = client_apify.actor("apify/instagram-scraper").call(run_input=run_input)
         if not run: return None
@@ -260,7 +242,9 @@ def agente_tempestade_ideias(conteudo_base):
         return None
 
 def agente_arquiteto_carrossel(ideia_escolhida, conteudo_base):
-    """Escreve o roteiro detalhado com notas de engenharia"""
+    """
+    Gera o roteiro em JSON com os parâmetros calibrados.
+    """
     try:
         prompt_user = f"""
         CONTEÚDO ORIGINAL DE BASE:
@@ -270,21 +254,26 @@ def agente_arquiteto_carrossel(ideia_escolhida, conteudo_base):
         Título: {ideia_escolhida['titulo']}
         Estrutura: {ideia_escolhida['estrutura']}
         Lógica: {ideia_escolhida['por_que_funciona']}
-        
-        Tarefa: Escreva o roteiro slide por slide seguindo suas instruções de engenharia.
         """
         
+        # CHAMADA CONFIGURADA EXATAMENTE COMO VOCÊ PEDIU
         completion = client_groq.chat.completions.create(
             messages=[
                 {"role": "system", "content": SYSTEM_PROMPT_ARQUITETO},
                 {"role": "user", "content": prompt_user}
             ],
-            model="llama-3.3-70b-versatile",
-            temperature=0.6,
+            model="llama3-70b-8192",  # Modelo Sênior
+            temperature=0.5,          # Equilíbrio
+            top_p=0.9,
+            max_tokens=1024,
+            response_format={"type": "json_object"} # Garante o JSON
         )
-        return completion.choices[0].message.content
+        
+        texto_limpo = limpar_json(completion.choices[0].message.content)
+        return json.loads(texto_limpo)
     except Exception as e:
-        return f"Erro ao gerar carrossel: {e}"
+        st.error(f"Erro na IA Arquiteto: {e}")
+        return None
 
 # --- INTERFACE PRINCIPAL ---
 
@@ -296,13 +285,14 @@ if st.button("⚡ Analisar e Gerar Conceitos", type="primary"):
     if not url_input:
         st.warning("Insira um link.")
     else:
-        st.session_state['conteudo_base'] = None # Limpa anterior
+        st.session_state['conteudo_base'] = None 
         st.session_state['ideias_geradas'] = None
+        st.session_state['roteiro_final'] = None
         
         status = st.status("Processando conteúdo...", expanded=True)
         texto_extraido = ""
 
-        # LÓGICA DE EXTRAÇÃO (IGUAL AO ANTERIOR)
+        # LÓGICA DE EXTRAÇÃO
         if tipo_conteudo == "YouTube":
             status.write("⬇️ Baixando YouTube...")
             f = download_youtube_audio(url_input)
@@ -357,7 +347,6 @@ if 'ideias_geradas' in st.session_state and st.session_state['ideias_geradas']:
     
     ideias = st.session_state['ideias_geradas']
     
-    # Loop para exibir os cartões
     for i, ideia in enumerate(ideias):
         with st.container(border=True):
             col_txt, col_btn = st.columns([4, 1])
@@ -370,26 +359,46 @@ if 'ideias_geradas' in st.session_state and st.session_state['ideias_geradas']:
             with col_btn:
                 st.write("")
                 st.write("")
-                # Botão único para cada ideia
                 if st.button("🎨 Gerar Carrossel", key=f"btn_car_{i}"):
                     st.session_state['ideia_ativa'] = ideia
+                    # Limpa roteiro anterior se mudar de ideia
+                    st.session_state['roteiro_final'] = None 
                     st.rerun()
 
-# --- EXIBIÇÃO DO ROTEIRO FINAL ---
+# --- EXIBIÇÃO DO ROTEIRO FINAL (VISUAL APRIMORADO) ---
 if 'ideia_ativa' in st.session_state:
     st.markdown("---")
     st.info(f"🏗️ Projetando Carrossel: **{st.session_state['ideia_ativa']['titulo']}**")
     
-    with st.spinner("O Arquiteto está desenhando os slides..."):
-        roteiro = agente_arquiteto_carrossel(
-            st.session_state['ideia_ativa'], 
-            st.session_state.get('conteudo_base', '')
-        )
-        
-        st.success("Projeto Finalizado!")
-        with st.container(border=True):
-            st.markdown(roteiro)
+    # Se ainda não tem roteiro ou se trocou de ideia, gera
+    if st.session_state.get('roteiro_final') is None:
+        with st.spinner("O Arquiteto está desenhando os slides..."):
+            roteiro_json = agente_arquiteto_carrossel(
+                st.session_state['ideia_ativa'], 
+                st.session_state.get('conteudo_base', '')
+            )
+            st.session_state['roteiro_final'] = roteiro_json
+            st.rerun() # Recarrega para exibir
             
+    # EXIBIÇÃO VISUAL DOS SLIDES
+    roteiro = st.session_state.get('roteiro_final')
+    if roteiro and 'carrossel' in roteiro:
+        st.success("Projeto Finalizado! 👇")
+        
+        for slide in roteiro['carrossel']:
+            with st.container(border=True):
+                c1, c2 = st.columns([1, 4])
+                with c1:
+                    st.markdown(f"#### Painel {slide.get('painel', '#')}")
+                    st.caption(f"**{slide.get('fase', 'Fase')}**")
+                with c2:
+                    st.markdown(f"📝 **Texto:**")
+                    st.code(slide.get('texto', ''), language="text")
+                    
+                    st.markdown(f"🔧 **Nota de Engenharia:**")
+                    st.info(slide.get('nota_engenharia', ''))
+    
     if st.button("Fechar Projeto"):
         del st.session_state['ideia_ativa']
+        st.session_state['roteiro_final'] = None
         st.rerun()
