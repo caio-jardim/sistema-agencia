@@ -105,24 +105,43 @@ def carregar_ids_existentes(sheet):
         return set()
 
 def baixar_video_with_retry(url, filename, retries=3):
+    # Headers completos para enganar o CDN do Instagram
     headers = {
-        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+        "Accept": "*/*",
+        "Accept-Encoding": "identity;q=1, *;q=0",
+        "Accept-Language": "en-US,en;q=0.9",
+        "Referer": "https://www.instagram.com/"
     }
+    
     for i in range(retries):
         try:
-            response = requests.get(url, headers=headers, stream=True, timeout=30)
-            response.raise_for_status()
-            with open(filename, 'wb') as f:
-                for chunk in response.iter_content(chunk_size=8192):
-                    f.write(chunk)
+            # Tenta baixar com timeout maior (60s)
+            with requests.get(url, headers=headers, stream=True, timeout=60) as r:
+                r.raise_for_status()
+                with open(filename, 'wb') as f:
+                    for chunk in r.iter_content(chunk_size=8192):
+                        f.write(chunk)
             return True
+            
         except Exception as e:
-            if i < retries - 1:
-                time.sleep(2)
-                continue
-            else:
-                st.error(f"❌ Erro download final: {e}")
-                return False
+            # Se falhar, espera um pouco antes de tentar de novo
+            time.sleep(2 + i) # Espera exponencial (2s, 3s, 4s...)
+            
+            # Se for a última tentativa, tenta o PLANO B (urllib)
+            if i == retries - 1:
+                try:
+                    import urllib.request
+                    opener = urllib.request.build_opener()
+                    opener.addheaders = [('User-Agent', headers['User-Agent'])]
+                    urllib.request.install_opener(opener)
+                    urllib.request.urlretrieve(url, filename)
+                    return True
+                except Exception as e2:
+                    st.error(f"❌ Falha definitiva no download: {e} | Backup: {e2}")
+                    return False
+                    
+    return False
 
 def analisar_video_groq(video_path, status_box):
     # Verifica a chave da Groq

@@ -76,7 +76,7 @@ def verificar_existencia_db(client, aba_nome, url_input):
     """
     try:
         try:
-            sh = client.open("DB_E21_Conteudos") # NOME AJUSTADO
+            sh = client.open("DB_E21_Conteudos") # Nome correto
         except gspread.exceptions.SpreadsheetNotFound:
             st.error("❌ A planilha 'DB_E21_Conteudos' não foi encontrada.")
             return None
@@ -84,7 +84,7 @@ def verificar_existencia_db(client, aba_nome, url_input):
         try:
             worksheet = sh.worksheet(aba_nome)
         except:
-            # Se a aba não existe, cria com os cabeçalhos (incluindo Legenda agora)
+            # Se a aba não existe, cria com os cabeçalhos
             worksheet = sh.add_worksheet(title=aba_nome, rows="1000", cols="20")
             if aba_nome == "instagram":
                 worksheet.append_row(["ID_Unico", "Data_Coleta", "Perfil", "Data_Postagem", "URL_Original", "Views", "Likes", "Comments", "Transcricao_Whisper", "Gancho_Verbal", "Legenda"])
@@ -110,47 +110,54 @@ def verificar_existencia_db(client, aba_nome, url_input):
         return None
 
 def salvar_no_db(client, aba_nome, dados):
-    """Salva uma nova linha na planilha"""
+    """
+    Salva uma nova linha na planilha com ID_Unico e colunas atualizadas.
+    """
     try:
-        sh = client.open("DB_E21_Conteudos") # NOME AJUSTADO
+        sh = client.open("DB_E21_Conteudos")
         worksheet = sh.worksheet(aba_nome)
         
-        # Limpa o texto da legenda para não quebrar a planilha (remove tabs e quebras excessivas)
-        legenda_limpa = str(dados.get("caption", "")).replace("\t", " ").replace("\n", " ")[:4000] 
+        # Funções auxiliares para evitar erros de NoneType
+        def safe_str(key): return str(dados.get(key, "") or "")
+        def safe_int(key): return int(dados.get(key, 0) or 0)
+        
+        # Limpa o texto da legenda
+        legenda_limpa = safe_str("caption").replace("\t", " ").replace("\n", " ")[:4000] 
 
         if aba_nome == "instagram":
-            # Ordem: ID, Data, Perfil, Postagem, URL, Views, Likes, Comments, Transcricao, Gancho, Legenda
+            # Colunas: ID_Unico, Data_Coleta, Perfil, Data_Postagem, URL_Original, Views, Likes, Comments, Transcricao_Whisper, Gancho_Verbal, Legenda
             row = [
-                str(dados.get("id_unico", "")),
+                safe_str("id_unico"),
                 datetime.now().strftime("%d/%m/%Y"),
-                str(dados.get("perfil", "")),
-                str(dados.get("data_postagem", "")),
-                str(dados.get("url", "")),
-                dados.get("views", 0),
-                dados.get("likes", 0),
-                dados.get("comments", 0),
-                str(dados.get("transcricao", "")),
-                str(dados.get("gancho_verbal", "")),
-                legenda_limpa # Nova Coluna
+                safe_str("perfil"),
+                safe_str("data_postagem"),
+                safe_str("url"),
+                safe_int("views"),
+                safe_int("likes"),
+                safe_int("comments"),
+                safe_str("transcricao"),
+                safe_str("gancho_verbal"),
+                legenda_limpa
             ]
         else: # Youtube
+            # Colunas: ID_Unico, Data_Coleta, Perfil, Data_Postagem, URL_Original, Views, Likes, Comments, Transcricao_Whisper, Legenda
             row = [
-                str(dados.get("id_unico", "")),
+                safe_str("id_unico"),
                 datetime.now().strftime("%d/%m/%Y"),
-                str(dados.get("perfil", "")),
-                str(dados.get("data_postagem", "")),
-                str(dados.get("url", "")),
-                dados.get("views", 0),
-                dados.get("likes", 0),
-                dados.get("comments", 0),
-                str(dados.get("transcricao", "")),
-                legenda_limpa # Nova Coluna (Descrição)
+                safe_str("perfil"),
+                safe_str("data_postagem"),
+                safe_str("url"),
+                safe_int("views"),
+                safe_int("likes"),
+                safe_int("comments"),
+                safe_str("transcricao"),
+                legenda_limpa
             ]
             
         worksheet.append_row(row)
         return True
     except Exception as e:
-        st.error(f"Erro ao salvar no Banco de Dados (mas o carrossel será gerado): {e}")
+        st.error(f"Erro ao salvar no Banco de Dados: {e}")
         return False
 
 # ==========================================
@@ -216,29 +223,20 @@ Retorne APENAS um objeto JSON.
 # --- FUNÇÕES AUXILIARES ---
 
 def limpar_json(texto):
-    """
-    Limpa de forma CIRÚRGICA para garantir JSON válido.
-    Encontra o primeiro '[' e o último ']'. Corta todo o resto.
-    Isso resolve o erro 'Extra data'.
-    """
+    """Limpa de forma CIRÚRGICA para garantir JSON válido."""
     texto = texto.replace("```json", "").replace("```", "").strip()
     
-    # Busca por ARRAY (Lista de ideias)
     start_arr = texto.find("[")
     end_arr = texto.rfind("]")
-    
-    # Busca por OBJETO (Roteiro final)
     start_obj = texto.find("{")
     end_obj = texto.rfind("}")
     
-    # Decide qual usar (prioriza array se o prompt pediu lista)
     if start_arr != -1 and end_arr != -1 and (start_obj == -1 or start_arr < start_obj):
         return texto[start_arr:end_arr+1]
-        
     if start_obj != -1 and end_obj != -1:
         return texto[start_obj:end_obj+1]
         
-    return texto # Se não achou nada, retorna original (vai dar erro, mas é o que temos)
+    return texto
 
 def get_youtube_metadata(url):
     ydl_opts = {'quiet': True, 'no_warnings': True}
@@ -330,7 +328,7 @@ def transcrever_audio_groq(filepath):
 
 def agente_tempestade_ideias(conteudo_base):
     try:
-        prompt_user = f"Analise este conteúdo e gere 3 conceitos:\n\nCONTEÚDO BASE:\n{conteudo_base[:6000]}"
+        prompt_user = f"Analise este conteúdo e gere 3 conceitos:\n\nCONTEÚDO BASE:\n{conteudo_base[:12000]}" # Aumentei o contexto
         completion = client_groq.chat.completions.create(
             messages=[
                 {"role": "system", "content": SYSTEM_PROMPT_TEMPESTADE},
@@ -343,15 +341,21 @@ def agente_tempestade_ideias(conteudo_base):
         return json.loads(texto_limpo)
     except Exception as e:
         st.error(f"Erro na IA Tempestade: {e}")
-        # Mostra o texto bruto para debug se falhar
-        # st.text_area("JSON Bruto Recebido (Erro)", completion.choices[0].message.content)
         return None
 
 def agente_arquiteto_carrossel(ideia_escolhida, conteudo_base):
+    """
+    Gera o roteiro em JSON usando a transcrição COMPLETA (ou quase completa)
+    para evitar alucinações.
+    """
     try:
         prompt_user = f"""
-        CONTEÚDO ORIGINAL DE BASE:
-        "{conteudo_base[:3000]}"
+        INSTRUÇÃO CRÍTICA: Baseie-se ESTRITAMENTE na transcrição/conteúdo abaixo para criar o roteiro.
+        Não invente fatos que não estejam no texto base.
+        
+        === CONTEÚDO ORIGINAL (TRANSCRIÇÃO) ===
+        "{conteudo_base[:12000]}" 
+        =======================================
         
         CONCEITO ESCOLHIDO PARA O CARROSSEL:
         Título: {ideia_escolhida['titulo']}
@@ -367,7 +371,7 @@ def agente_arquiteto_carrossel(ideia_escolhida, conteudo_base):
             model="llama-3.3-70b-versatile",
             temperature=0.5,
             top_p=0.9,
-            max_tokens=1024,
+            max_tokens=2048, # Aumentei para garantir resposta completa
             response_format={"type": "json_object"}
         )
         
@@ -426,7 +430,7 @@ if st.button("⚡ Analisar e Gerar Conceitos", type="primary"):
                     "views": meta.get('views', 0),
                     "likes": meta.get('likes', 0),
                     "comments": meta.get('comments', 0),
-                    "caption": meta.get('caption', '') # Add caption (descrição)
+                    "caption": meta.get('caption', '') 
                 }
                 
                 status.write("⬇️ Baixando áudio...")
@@ -449,7 +453,7 @@ if st.button("⚡ Analisar e Gerar Conceitos", type="primary"):
                         "views": data.get('videoViewCount') or data.get('playCount', 0),
                         "likes": data.get('likesCount', 0),
                         "comments": data.get('commentsCount', 0),
-                        "caption": data.get('caption', '') # Add caption (legenda)
+                        "caption": data.get('caption', '') 
                     }
 
                     if tipo_conteudo == "Reels (Instagram)":
