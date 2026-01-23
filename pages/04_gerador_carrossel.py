@@ -75,7 +75,7 @@ def verificar_existencia_db(client, aba_nome, url_input):
     Retorna o texto da transcrição se existir, ou None.
     """
     try:
-        sh = client.open("DB_Conteudos")
+        sh = client.open("DB_E21_Conteudos")
         try:
             worksheet = sh.worksheet(aba_nome)
         except:
@@ -108,7 +108,7 @@ def verificar_existencia_db(client, aba_nome, url_input):
 def salvar_no_db(client, aba_nome, dados):
     """Salva uma nova linha na planilha"""
     try:
-        sh = client.open("DB_Conteudos")
+        sh = client.open("DB_E21_Conteudos")
         worksheet = sh.worksheet(aba_nome)
         
         # Prepara a linha baseada na estrutura pedida
