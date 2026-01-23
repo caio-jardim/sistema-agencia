@@ -135,7 +135,6 @@ def analisar_video_groq(video_path, status_box):
     if "groq" in st.secrets and "api_key" in st.secrets["groq"]:
         api_key = st.secrets["groq"]["api_key"]
     else:
-        # Fallback para formato antigo se existir
         api_key = st.secrets.get("groq_api_key")
         
     client_groq = Groq(api_key=api_key)
@@ -150,15 +149,17 @@ def analisar_video_groq(video_path, status_box):
         except Exception as e:
             return {"transcricao": f"Erro MoviePy: {e}", "ganchos_verbais": "-"}
 
+        # 1. Transcrição COMPLETA (Whisper)
         status_box.write("📝 Transcrevendo (Whisper)...")
         with open(audio_path, "rb") as file:
             transcription = client_groq.audio.transcriptions.create(
                 file=(audio_path, file.read()),
                 model="whisper-large-v3", 
-                response_format="text"
+                response_format="text" # Garante o texto completo
             )
         texto_transcrito = str(transcription)
 
+        # 2. Análise de Ganchos (Llama 3)
         status_box.write("🧠 Analisando com Llama 3...")
         prompt = f"""
         Analise a transcrição deste vídeo curto:
@@ -166,8 +167,9 @@ def analisar_video_groq(video_path, status_box):
 
         Identifique:
         1. O Gancho Verbal (Frase exata do início).
+        2. O Gancho Visual (O que descreve a cena inicial, se houver pistas no texto, senão deixe vazio).
         
-        Retorne JSON: {{ "ganchos_verbais": "..." }}
+        Retorne JSON: {{ "ganchos_verbais": "...", "ganchos_visuais": "..." }}
         """
         
         completion = client_groq.chat.completions.create(
@@ -181,16 +183,17 @@ def analisar_video_groq(video_path, status_box):
 
         if os.path.exists(audio_path): os.remove(audio_path)
 
+        # Retorna TUDO completo como antes
         return {
             "transcricao": texto_transcrito,
-            "ganchos_verbais": resultado_ia.get("ganchos_verbais", "-")
+            "ganchos_verbais": resultado_ia.get("ganchos_verbais", "-"),
+            "ganchos_visuais": resultado_ia.get("ganchos_visuais", "-")
         }
 
     except Exception as e:
         status_box.error(f"Erro Groq: {e}")
         if os.path.exists(audio_path): os.remove(audio_path)
         return {"transcricao": "Erro API", "ganchos_verbais": "-"}
-
 def pegar_dados_apify(perfil, dias, container_log):
     if "apify_token" not in st.secrets:
         st.error("Token da Apify não configurado.")
