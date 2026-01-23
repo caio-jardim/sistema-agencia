@@ -4,6 +4,9 @@ import time
 import json
 import requests
 import yt_dlp
+import gspread
+from datetime import datetime
+from oauth2client.service_account import ServiceAccountCredentials
 from groq import Groq
 from apify_client import ApifyClient
 from moviepy.editor import VideoFileClip
@@ -51,10 +54,100 @@ except Exception as e:
     st.stop()
 
 # ==========================================
-# PROMPTS DE INTELIGÊNCIA (O CÉREBRO)
+# INTEGRAÇÃO GOOGLE SHEETS
 # ==========================================
 
-# 1. PROMPT PARA GERAR AS IDEIAS (JSON)
+def conectar_sheets():
+    """Conecta ao Google Sheets usando as credenciais do secrets"""
+    scope = ["https://spreadsheets.google.com/feeds", "https://www.googleapis.com/auth/drive"]
+    try:
+        creds_dict = dict(st.secrets["gcp_service_account"])
+        creds = ServiceAccountCredentials.from_json_keyfile_dict(creds_dict, scope)
+        client = gspread.authorize(creds)
+        return client
+    except Exception as e:
+        st.error(f"Erro ao conectar no Google Sheets: {e}")
+        return None
+
+def verificar_existencia_db(client, aba_nome, url_input):
+    """
+    Verifica se a URL já existe na planilha.
+    Retorna o texto da transcrição se existir, ou None.
+    """
+    try:
+        sh = client.open("DB_Conteudos")
+        try:
+            worksheet = sh.worksheet(aba_nome)
+        except:
+            # Se a aba não existe, cria com os cabeçalhos corretos
+            worksheet = sh.add_worksheet(title=aba_nome, rows="1000", cols="20")
+            if aba_nome == "instagram":
+                worksheet.append_row(["ID_Unico", "Data_Coleta", "Perfil", "Data_Postagem", "URL_Original", "Views", "Likes", "Comments", "Transcricao_Whisper", "Gancho_Verbal"])
+            else:
+                worksheet.append_row(["ID_Unico", "Data_Coleta", "Perfil", "Data_Postagem", "URL_Original", "Views", "Likes", "Comments", "Transcricao_Whisper"])
+        
+        # Procura a URL na coluna 5 (URL_Original)
+        # Nota: O gspread cell.col começa em 1. A coluna E é a 5.
+        try:
+            cell = worksheet.find(url_input)
+            if cell:
+                # Se achou, pega a Transcrição (Coluna 9 - I)
+                # linha = cell.row
+                row_values = worksheet.row_values(cell.row)
+                # A transcrição é o índice 8 (coluna 9)
+                if len(row_values) >= 9:
+                    return row_values[8] # Retorna a transcrição
+        except gspread.exceptions.CellNotFound:
+            return None
+            
+        return None
+    except Exception as e:
+        st.warning(f"Não foi possível ler o banco de dados: {e}")
+        return None
+
+def salvar_no_db(client, aba_nome, dados):
+    """Salva uma nova linha na planilha"""
+    try:
+        sh = client.open("DB_Conteudos")
+        worksheet = sh.worksheet(aba_nome)
+        
+        # Prepara a linha baseada na estrutura pedida
+        if aba_nome == "instagram":
+            row = [
+                dados.get("id_unico", ""),
+                datetime.now().strftime("%d/%m/%Y"), # Data Coleta
+                dados.get("perfil", ""),
+                dados.get("data_postagem", ""),
+                dados.get("url", ""),
+                dados.get("views", 0),
+                dados.get("likes", 0),
+                dados.get("comments", 0),
+                dados.get("transcricao", ""),
+                dados.get("gancho_verbal", "") # Extra para Insta
+            ]
+        else: # Youtube
+            row = [
+                dados.get("id_unico", ""),
+                datetime.now().strftime("%d/%m/%Y"),
+                dados.get("perfil", ""),
+                dados.get("data_postagem", ""),
+                dados.get("url", ""),
+                dados.get("views", 0),
+                dados.get("likes", 0),
+                dados.get("comments", 0),
+                dados.get("transcricao", "")
+            ]
+            
+        worksheet.append_row(row)
+        return True
+    except Exception as e:
+        st.error(f"Erro ao salvar no Banco de Dados: {e}")
+        return False
+
+# ==========================================
+# PROMPTS DE INTELIGÊNCIA
+# ==========================================
+
 SYSTEM_PROMPT_TEMPESTADE = """
 VOCÊ É: Um Estrategista de Conteúdo Viral e Analista de Atenção.
 SUA MISSÃO: Analisar o CONTEÚDO BASE e Gerar estruturas de conteúdo validadas psicologicamente.
@@ -64,22 +157,6 @@ TOM DE VOZ:
 - Analítico, cirúrgico e "Sênior".
 - Foco em: "Por que isso funciona?" (Psicologia do consumidor).
 - Zero "encher linguiça". Vá direto à estrutura.
-
-EXEMPLOS DE TREINAMENTO (FEW-SHOT):
-
-Usuário: Ideias para Padaria Artesanal.
-Você:
-1. “O pão que você compra não é pão”
-Estrutura: Confrontação de realidade + quebra de senso comum
-Por que funciona: Ataca uma crença automática do público e reposiciona a padaria como referência técnica. A ideia não é ensinar receita, e sim mudar o critério de julgamento.
-
-2. “Por que essa fornada nunca fica igual à outra”
-Estrutura: Bastidores + dinâmica invisível do processo
-Por que funciona: Revela que a imperfeição controlada é sinal de qualidade artesanal. Educa o público a valorizar variáveis como fermentação natural. Transforma "defeito" em prova de excelência.
-
-3. “O erro que faz a maioria desistir do pão artesanal”
-Estrutura: Combate ao inimigo + posicionamento claro
-Por que funciona: Define um vilão (pressa/atalhos) e posiciona a marca como quem escolheu o caminho difícil. Filtra curiosos de compradores reais.
 
 FORMATO DE RESPOSTA (JSON ESTRITO):
 Você deve retornar APENAS um JSON válido contendo um array de objetos. 
@@ -96,8 +173,6 @@ Estrutura obrigatória:
 ]
 """
 
-# 2. PROMPT PARA ESCREVER O CARROSSEL (SEU NOVO PROMPT)
-# 2. PROMPT ARQUITETO (AGORA EM JSON E OTIMIZADO)
 SYSTEM_PROMPT_ARQUITETO = """
 VOCÊ É: Um Engenheiro de Atenção e Estrategista de Narrativas (Nível Sênior).
 Sua especialidade é criar roteiros de carrossel que geram "Stop Scroll" imediato.
@@ -133,11 +208,6 @@ Ao escrever a "Nota de Engenharia" (no JSON), escolha um destes:
 2. TOM ÁCIDO: Seja direto. Corte palavras de transição.
 3. ZERO OBVIEDADE: Nada de "Seja resiliente". Seja contra-intuitivo.
 
-## O QUE VOCÊ NÃO DEVE FAZER:
-- NÃO use emojis no meio do texto.
-- NÃO dê boas vindas.
-- NÃO explique o óbvio.
-
 ## FORMATO DE SAÍDA (JSON OBRIGATÓRIO):
 Você deve retornar APENAS um objeto JSON. Sem Markdown, sem ```json```, sem intro.
 
@@ -166,15 +236,30 @@ def limpar_json(texto):
     texto = texto.replace("```json", "").replace("```", "")
     start = texto.find("{") # Procura chaves (objeto)
     if start == -1: start = texto.find("[") # Ou colchetes (array)
-    
-    # Procura o final
     end_obj = texto.rfind("}")
     end_arr = texto.rfind("]")
     end = max(end_obj, end_arr) + 1
-    
     if start != -1 and end != -1:
         return texto[start:end]
     return texto
+
+def get_youtube_metadata(url):
+    """Extrai metadados do YouTube sem baixar o vídeo"""
+    ydl_opts = {'quiet': True, 'no_warnings': True}
+    try:
+        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+            info = ydl.extract_info(url, download=False)
+            return {
+                "id_unico": info.get('id'),
+                "perfil": info.get('uploader') or info.get('channel'),
+                "data_postagem": info.get('upload_date'), # Formato YYYYMMDD
+                "views": info.get('view_count'),
+                "likes": info.get('like_count'),
+                "comments": info.get('comment_count'),
+                "title": info.get('title')
+            }
+    except:
+        return {}
 
 def download_youtube_audio(url):
     """Baixa áudio do YouTube usando yt-dlp (Modo Android)"""
@@ -204,7 +289,7 @@ def download_youtube_audio(url):
             return None
 
 def get_instagram_data_apify(url):
-    """Usa Apify para pegar dados do post (Sem searchType)"""
+    """Usa Apify para pegar dados do post"""
     run_input = {
         "directUrls": [url],
         "resultsType": "posts",
@@ -249,7 +334,6 @@ def transcrever_audio_groq(filepath):
 # --- AGENTES DE IA ---
 
 def agente_tempestade_ideias(conteudo_base):
-    """Gera 3 ideias em JSON"""
     try:
         prompt_user = f"Analise este conteúdo e gere 3 conceitos:\n\nCONTEÚDO BASE:\n{conteudo_base[:6000]}"
         completion = client_groq.chat.completions.create(
@@ -267,9 +351,6 @@ def agente_tempestade_ideias(conteudo_base):
         return None
 
 def agente_arquiteto_carrossel(ideia_escolhida, conteudo_base):
-    """
-    Gera o roteiro em JSON com os parâmetros calibrados.
-    """
     try:
         prompt_user = f"""
         CONTEÚDO ORIGINAL DE BASE:
@@ -281,17 +362,16 @@ def agente_arquiteto_carrossel(ideia_escolhida, conteudo_base):
         Lógica: {ideia_escolhida['por_que_funciona']}
         """
         
-        # CHAMADA CONFIGURADA EXATAMENTE COMO VOCÊ PEDIU
         completion = client_groq.chat.completions.create(
             messages=[
                 {"role": "system", "content": SYSTEM_PROMPT_ARQUITETO},
                 {"role": "user", "content": prompt_user}
             ],
-            model="llama-3.3-70b-versatile",  # Modelo Sênior
-            temperature=0.5,          # Equilíbrio
+            model="llama-3.3-70b-versatile",
+            temperature=0.5,
             top_p=0.9,
             max_tokens=1024,
-            response_format={"type": "json_object"} # Garante o JSON
+            response_format={"type": "json_object"}
         )
         
         texto_limpo = limpar_json(completion.choices[0].message.content)
@@ -310,48 +390,103 @@ if st.button("⚡ Analisar e Gerar Conceitos", type="primary"):
     if not url_input:
         st.warning("Insira um link.")
     else:
+        # Reset de estados
         st.session_state['conteudo_base'] = None 
         st.session_state['ideias_geradas'] = None
         st.session_state['roteiro_final'] = None
         
-        status = st.status("Processando conteúdo...", expanded=True)
+        status = st.status("Iniciando processo...", expanded=True)
         texto_extraido = ""
+        
+        # 1. CONEXÃO COM BANCO DE DADOS
+        gs_client = conectar_sheets()
+        if not gs_client:
+            status.update(label="Erro no Banco de Dados", state="error")
+            st.stop()
+            
+        aba_alvo = "Youtube" if tipo_conteudo == "YouTube" else "instagram"
+        
+        # 2. VERIFICA SE JÁ EXISTE (ECONOMIA DE CRÉDITOS)
+        status.write(f"🔎 Verificando se link já existe na aba '{aba_alvo}'...")
+        transcricao_db = verificar_existencia_db(gs_client, aba_alvo, url_input)
+        
+        if transcricao_db:
+            status.write("✅ Encontrado no Banco de Dados! Usando dados salvos.")
+            texto_extraido = transcricao_db
+            time.sleep(1) # UX
+        else:
+            status.write("⚠️ Não encontrado. Iniciando extração (Apify/Download)...")
+            
+            # 3. PROCESSO DE EXTRAÇÃO (SE NÃO EXISTIR)
+            dados_para_salvar = {}
+            
+            if tipo_conteudo == "YouTube":
+                # Pega Metadados
+                meta = get_youtube_metadata(url_input)
+                dados_para_salvar = {
+                    "id_unico": meta.get('id_unico', ''),
+                    "perfil": meta.get('perfil', ''),
+                    "data_postagem": meta.get('data_postagem', ''),
+                    "url": url_input,
+                    "views": meta.get('views', 0),
+                    "likes": meta.get('likes', 0),
+                    "comments": meta.get('comments', 0)
+                }
+                
+                status.write("⬇️ Baixando áudio...")
+                f = download_youtube_audio(url_input)
+                if f:
+                    status.write("👂 Transcrevendo (Groq)...")
+                    texto_extraido = transcrever_audio_groq(f)
+                    if os.path.exists(f): os.remove(f)
+                    
+            elif tipo_conteudo in ["Reels (Instagram)", "Carrossel (Instagram)"]:
+                status.write("🕵️ Acessando Apify...")
+                data = get_instagram_data_apify(url_input)
+                
+                if data:
+                    # Prepara dados para salvar
+                    dados_para_salvar = {
+                        "id_unico": data.get('id', ''),
+                        "perfil": data.get('ownerUsername', ''),
+                        "data_postagem": data.get('timestamp', '')[:10],
+                        "url": url_input,
+                        "views": data.get('videoViewCount') or data.get('playCount', 0),
+                        "likes": data.get('likesCount', 0),
+                        "comments": data.get('commentsCount', 0)
+                    }
 
-        # LÓGICA DE EXTRAÇÃO
-        if tipo_conteudo == "YouTube":
-            status.write("⬇️ Baixando YouTube...")
-            f = download_youtube_audio(url_input)
-            if f:
-                status.write("👂 Transcrevendo...")
-                texto_extraido = transcrever_audio_groq(f)
-                if os.path.exists(f): os.remove(f)
+                    if tipo_conteudo == "Reels (Instagram)":
+                        v_url = data.get('videoUrl') or data.get('video_url')
+                        if v_url and download_file(v_url, "temp.mp4"):
+                            try:
+                                vc = VideoFileClip("temp.mp4")
+                                vc.audio.write_audiofile("temp.mp3", verbose=False, logger=None)
+                                vc.close()
+                                status.write("👂 Transcrevendo...")
+                                texto_extraido = transcrever_audio_groq("temp.mp3")
+                            except: 
+                                st.error("Erro processamento vídeo")
+                            finally:
+                                if os.path.exists("temp.mp4"): os.remove("temp.mp4")
+                                if os.path.exists("temp.mp3"): os.remove("temp.mp3")
+                    
+                    elif tipo_conteudo == "Carrossel (Instagram)":
+                        cap = data.get('caption') or ""
+                        alts = [c.get('alt') for c in (data.get('childPosts') or []) if c.get('alt')]
+                        texto_extraido = f"LEGENDA:\n{cap}\nVISUAL:\n{' '.join(alts)}"
 
-        elif tipo_conteudo == "Reels (Instagram)":
-            status.write("🕵️ Acessando Reels...")
-            data = get_instagram_data_apify(url_input)
-            if data and (data.get('videoUrl') or data.get('video_url')):
-                v_url = data.get('videoUrl') or data.get('video_url')
-                if download_file(v_url, "temp.mp4"):
-                    try:
-                        vc = VideoFileClip("temp.mp4")
-                        vc.audio.write_audiofile("temp.mp3", verbose=False, logger=None)
-                        vc.close()
-                        status.write("👂 Transcrevendo...")
-                        texto_extraido = transcrever_audio_groq("temp.mp3")
-                    except: st.error("Erro processamento vídeo")
-                    finally:
-                        if os.path.exists("temp.mp4"): os.remove("temp.mp4")
-                        if os.path.exists("temp.mp3"): os.remove("temp.mp3")
+            # 4. SALVAMENTO NO BANCO (SE FOI EXTRAÍDO AGORA)
+            if texto_extraido:
+                dados_para_salvar["transcricao"] = texto_extraido
+                # Gancho verbal simples (primeiros 100 chars) para Insta
+                if aba_alvo == "instagram":
+                    dados_para_salvar["gancho_verbal"] = texto_extraido[:100] + "..."
+                
+                status.write("💾 Salvando novo conteúdo na Planilha...")
+                salvar_no_db(gs_client, aba_alvo, dados_para_salvar)
 
-        elif tipo_conteudo == "Carrossel (Instagram)":
-            status.write("🕵️ Lendo Carrossel...")
-            data = get_instagram_data_apify(url_input)
-            if data:
-                cap = data.get('caption') or ""
-                alts = [c.get('alt') for c in (data.get('childPosts') or []) if c.get('alt')]
-                texto_extraido = f"LEGENDA:\n{cap}\nVISUAL:\n{' '.join(alts)}"
-
-        # SE EXTRAIU COM SUCESSO, GERA AS IDEIAS
+        # 5. GERAÇÃO DAS IDEIAS (IA)
         if texto_extraido:
             st.session_state['conteudo_base'] = texto_extraido
             status.write("🧠 Gerando conceitos estruturais...")
@@ -359,7 +494,7 @@ if st.button("⚡ Analisar e Gerar Conceitos", type="primary"):
             
             if ideias:
                 st.session_state['ideias_geradas'] = ideias
-                status.update(label="Conceitos Prontos!", state="complete", expanded=False)
+                status.update(label="Processo Finalizado!", state="complete", expanded=False)
             else:
                 status.update(label="Erro na IA", state="error")
         else:
@@ -386,16 +521,14 @@ if 'ideias_geradas' in st.session_state and st.session_state['ideias_geradas']:
                 st.write("")
                 if st.button("🎨 Gerar Carrossel", key=f"btn_car_{i}"):
                     st.session_state['ideia_ativa'] = ideia
-                    # Limpa roteiro anterior se mudar de ideia
                     st.session_state['roteiro_final'] = None 
                     st.rerun()
 
-# --- EXIBIÇÃO DO ROTEIRO FINAL (VISUAL APRIMORADO) ---
+# --- EXIBIÇÃO DO ROTEIRO FINAL ---
 if 'ideia_ativa' in st.session_state:
     st.markdown("---")
     st.info(f"🏗️ Projetando Carrossel: **{st.session_state['ideia_ativa']['titulo']}**")
     
-    # Se ainda não tem roteiro ou se trocou de ideia, gera
     if st.session_state.get('roteiro_final') is None:
         with st.spinner("O Arquiteto está desenhando os slides..."):
             roteiro_json = agente_arquiteto_carrossel(
@@ -403,11 +536,18 @@ if 'ideia_ativa' in st.session_state:
                 st.session_state.get('conteudo_base', '')
             )
             st.session_state['roteiro_final'] = roteiro_json
-            st.rerun() # Recarrega para exibir
+            st.rerun()
             
-    # EXIBIÇÃO VISUAL DOS SLIDES
     roteiro = st.session_state.get('roteiro_final')
     if roteiro and 'carrossel' in roteiro:
+        # Exibe Metadados
+        meta = roteiro.get('meta_dados', {})
+        if meta:
+            c1, c2, c3 = st.columns(3)
+            c1.metric("Complexidade", meta.get('complexidade_detectada', '-'))
+            c2.metric("Slides", meta.get('total_slides', '-'))
+            c3.caption(f"Tema: {meta.get('tema', '-')}")
+            
         st.success("Projeto Finalizado! 👇")
         
         for slide in roteiro['carrossel']:
