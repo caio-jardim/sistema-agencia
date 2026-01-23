@@ -75,13 +75,13 @@ def conectar_sheets():
         try:
             sh = client.open(nome_planilha)
         except gspread.exceptions.SpreadsheetNotFound:
-            st.error(f"Planilha '{nome_planilha}' não encontrada. Verifique o nome ou compartilhamento.")
+            st.error(f"Planilha '{nome_planilha}' não encontrada.")
             return None
 
         try:
             sheet = sh.worksheet(nome_aba)
         except:
-            # Cria a aba se não existir com os cabeçalhos corretos
+            # Cria a aba se não existir
             sheet = sh.add_worksheet(title=nome_aba, rows="1000", cols="15")
             sheet.append_row([
                 "ID_Unico", "Data_Coleta", "Perfil", "Data_Postagem", 
@@ -95,19 +95,14 @@ def conectar_sheets():
         return None
 
 def carregar_ids_existentes(sheet):
-    """
-    Lê a coluna ID_Unico (Coluna 1) para evitar duplicidade.
-    Retorna um SET de IDs para busca rápida.
-    """
+    """Lê a coluna ID_Unico (Coluna 1) para evitar duplicidade."""
     try:
-        # Pega todos os valores da primeira coluna (ID_Unico)
         ids = sheet.col_values(1)
-        # Remove o cabeçalho se existir e converte para set para busca O(1)
         if ids and ids[0] == "ID_Unico":
             return set(ids[1:])
         return set(ids)
     except Exception as e:
-        st.warning(f"Não foi possível ler histórico de IDs: {e}")
+        st.warning(f"Erro ao ler cache: {e}")
         return set()
 
 def baixar_video_with_retry(url, filename, retries=3):
@@ -131,13 +126,13 @@ def baixar_video_with_retry(url, filename, retries=3):
                 return False
 
 def analisar_video_groq(video_path, status_box):
-    # Verifica chave correta no secrets
+    # Verifica a chave da Groq
     if "groq" in st.secrets and "api_key" in st.secrets["groq"]:
-        api_key = st.secrets["groq"]["api_key"]
+        client_groq = Groq(api_key=st.secrets["groq"]["api_key"])
     else:
-        api_key = st.secrets.get("groq_api_key")
-        
-    client_groq = Groq(api_key=api_key)
+        # Tenta pegar do antigo se não achar o novo
+        client_groq = Groq(api_key=st.secrets.get("groq_api_key"))
+
     audio_path = video_path.replace(".mp4", ".mp3")
 
     try:
@@ -149,27 +144,26 @@ def analisar_video_groq(video_path, status_box):
         except Exception as e:
             return {"transcricao": f"Erro MoviePy: {e}", "ganchos_verbais": "-"}
 
-        # 1. Transcrição COMPLETA (Whisper)
+        # 1. Transcrição (WHISPER) - Pega TUDO
         status_box.write("📝 Transcrevendo (Whisper)...")
         with open(audio_path, "rb") as file:
             transcription = client_groq.audio.transcriptions.create(
                 file=(audio_path, file.read()),
                 model="whisper-large-v3", 
-                response_format="text" # Garante o texto completo
+                response_format="text" # Garante texto puro completo
             )
-        texto_transcrito = str(transcription)
+        texto_transcrito_completo = str(transcription)
 
-        # 2. Análise de Ganchos (Llama 3)
-        status_box.write("🧠 Analisando com Llama 3...")
+        # 2. Análise (LLAMA 3) - Envia apenas o início para economizar e focar no gancho
+        status_box.write("🧠 Analisando Gancho com Llama 3...")
         prompt = f"""
         Analise a transcrição deste vídeo curto:
-        "{texto_transcrito[:4000]}"
+        "{texto_transcrito_completo[:4000]}"
 
         Identifique:
-        1. O Gancho Verbal (Frase exata do início).
-        2. O Gancho Visual (O que descreve a cena inicial, se houver pistas no texto, senão deixe vazio).
+        1. O Gancho Verbal (A primeira frase impactante ou o tema central nos primeiros segundos).
         
-        Retorne JSON: {{ "ganchos_verbais": "...", "ganchos_visuais": "..." }}
+        Retorne JSON ESTRITO: {{ "ganchos_verbais": "..." }}
         """
         
         completion = client_groq.chat.completions.create(
@@ -179,21 +173,23 @@ def analisar_video_groq(video_path, status_box):
             response_format={"type": "json_object"}
         )
 
-        resultado_ia = json.loads(completion.choices[0].message.content)
+        try:
+            resultado_ia = json.loads(completion.choices[0].message.content)
+        except:
+            resultado_ia = {"ganchos_verbais": "Erro no JSON da IA"}
 
         if os.path.exists(audio_path): os.remove(audio_path)
 
-        # Retorna TUDO completo como antes
         return {
-            "transcricao": texto_transcrito,
-            "ganchos_verbais": resultado_ia.get("ganchos_verbais", "-"),
-            "ganchos_visuais": resultado_ia.get("ganchos_visuais", "-")
+            "transcricao": texto_transcrito_completo, # Retorna o texto COMPLETO aqui
+            "ganchos_verbais": resultado_ia.get("ganchos_verbais", "-")
         }
 
     except Exception as e:
         status_box.error(f"Erro Groq: {e}")
         if os.path.exists(audio_path): os.remove(audio_path)
         return {"transcricao": "Erro API", "ganchos_verbais": "-"}
+
 def pegar_dados_apify(perfil, dias, container_log):
     if "apify_token" not in st.secrets:
         st.error("Token da Apify não configurado.")
@@ -212,7 +208,6 @@ def pegar_dados_apify(perfil, dias, container_log):
             "apifyProxyGroups": ["RESIDENTIAL"] 
         }
     }
-    # Fallback proxy para contas free
     # run_input["proxy"] = {"useApifyProxy": True, "apifyProxyGroups": []} 
 
     container_log.info(f"📡 Apify: Lendo @{perfil}...")
@@ -228,7 +223,6 @@ def pegar_dados_apify(perfil, dias, container_log):
         
         for item in dataset_items:
             tipo = item.get('type', '')
-            # Filtra apenas vídeos/reels
             if tipo not in ['Video', 'Reel', 'Sidecar', 'GraphVideo'] and not item.get('is_video', False):
                 continue
             
@@ -245,7 +239,7 @@ def pegar_dados_apify(perfil, dias, container_log):
             if data_post < data_limite: continue
 
             video_url = item.get('videoUrl')
-            # Tenta achar URL em posts filhos (carrossel) ou alternativos
+            # Tenta pegar URL de filhos se for carrossel
             if not video_url:
                  children = item.get('childPosts') or item.get('children') or []
                  for child in children:
@@ -255,12 +249,11 @@ def pegar_dados_apify(perfil, dias, container_log):
             if not video_url: continue
 
             legenda_raw = item.get('caption') or item.get('description') or ""
-            if legenda_raw is None: legenda_raw = ""
             
             views = item.get('videoViewCount') or item.get('playCount') or item.get('viewCount') or 0
             
             items_coletados.append({
-                "pk": str(item.get('id')), # ID ÚNICO
+                "pk": str(item.get('id')), # ID Único do Instagram
                 "data_str": data_post.strftime("%d/%m/%Y"),
                 "views": int(views),
                 "likes": int(item.get('likesCount') or 0),
@@ -279,15 +272,15 @@ def pegar_dados_apify(perfil, dias, container_log):
 # --- BOTÃO PRINCIPAL ---
 if st.button("🚀 Iniciar Análise (Apify + Groq)", type="primary"):
     
-    # 1. Conecta Planilha e Carrega IDs (CACHE)
+    # 1. Conecta Planilha e Carrega IDs
     sheet = conectar_sheets()
     if not sheet: st.stop()
     
-    st.toast("Verificando banco de dados...", icon="💾")
+    st.toast("Lendo IDs já processados...", icon="💾")
     ids_no_banco = carregar_ids_existentes(sheet)
-    st.write(f"📊 {len(ids_no_banco)} vídeos já cadastrados no banco.")
+    st.write(f"📊 {len(ids_no_banco)} vídeos já no banco de dados.")
 
-    timestamp_coleta = datetime.now().strftime("%d/%m/%Y")
+    timestamp = datetime.now().strftime("%d/%m/%Y")
     
     if not os.path.exists('temp_videos_groq'):
         os.makedirs('temp_videos_groq')
@@ -303,7 +296,6 @@ if st.button("🚀 Iniciar Análise (Apify + Groq)", type="primary"):
             st.warning("Nenhum vídeo recente encontrado.")
             continue
             
-        # Ordena por visualizações
         top_final = sorted(videos, key=lambda x: x['views'], reverse=True)[:TOP_VIDEOS]
         st.write(f"🏆 Top {len(top_final)} vídeos identificados.")
         
@@ -313,18 +305,18 @@ if st.button("🚀 Iniciar Análise (Apify + Groq)", type="primary"):
             rank = i + 1
             id_video = v['pk']
             
-            # --- VERIFICAÇÃO DE ID ÚNICO (REGRA DE OURO) ---
+            # --- VERIFICAÇÃO DE ID (EVITA CUSTO) ---
             if id_video in ids_no_banco:
-                with st.status(f"⏩ [Top {rank}] Vídeo já existe no banco (ID: {id_video})", state="complete", expanded=False):
-                    st.write("Pulando download e transcrição.")
+                with st.status(f"⏩ [Top {rank}] Vídeo já existe (ID: {id_video})", state="complete", expanded=False):
+                    st.write("Pulando...")
                 barra.progress((i + 1) / len(top_final))
                 continue
             
-            # Se não existe, processa
+            # SE É NOVO, PROCESSA
             ia_data = {"transcricao": "", "ganchos_verbais": ""}
             
             if rank <= TOP_ANALISE_IA:
-                with st.status(f"⭐ [Top {rank}] Processando Novo Vídeo ({v['views']} views)...", expanded=True) as status:
+                with st.status(f"⭐ [Top {rank}] Baixando e Transcrevendo...", expanded=True) as status:
                     
                     caminho_video_temp = os.path.join('temp_videos_groq', f"{id_video}.mp4")
                     
@@ -332,35 +324,36 @@ if st.button("🚀 Iniciar Análise (Apify + Groq)", type="primary"):
                     sucesso_download = baixar_video_with_retry(v['download_url'], caminho_video_temp)
                     
                     if sucesso_download:
+                        # Aqui ele vai pegar a transcrição COMPLETA
                         ia_data = analisar_video_groq(caminho_video_temp, status)
                         
                         if os.path.exists(caminho_video_temp):
                             os.remove(caminho_video_temp)
                         
-                        status.update(label="✅ Análise Groq Completa!", state="complete", expanded=False)
+                        status.update(label="✅ Processamento IA Concluído!", state="complete", expanded=False)
                     else:
                         status.update(label="❌ Falha no Download", state="error")
                         ia_data["transcricao"] = "Erro Download"
 
-            # --- SALVA NO SHEETS (ESTRUTURA CORRETA) ---
-            # Ordem: ID, Data Coleta, Perfil, Data Post, URL, Views, Likes, Comments, Transcricao, Gancho, Legenda
+            # --- SALVA NO SHEETS (ESTRUTURA ATUALIZADA) ---
+            # ID, Data Coleta, Perfil, Data Post, URL, Views, Likes, Comments, Transcricao, Gancho, Legenda
             nova_linha = [
                 id_video,                      # ID_Unico
-                timestamp_coleta,              # Data_Coleta
+                timestamp,                     # Data_Coleta
                 f"@{perfil}",                  # Perfil
                 v['data_str'],                 # Data_Postagem
                 v['link'],                     # URL_Original
                 v['views'],                    # Views
                 v['likes'],                    # Likes
                 v['comments'],                 # Comments
-                ia_data.get('transcricao', ''),# Transcricao_Whisper
-                ia_data.get('ganchos_verbais', ''), # Gancho_Verbal
+                ia_data.get('transcricao', ''),# Transcricao (COMPLETA)
+                ia_data.get('ganchos_verbais', ''), # Gancho
                 v['caption']                   # Legenda
             ]
             
             try:
                 sheet.append_row(nova_linha)
-                ids_no_banco.add(id_video) # Adiciona no cache local para não duplicar no mesmo loop
+                ids_no_banco.add(id_video) # Atualiza cache local
                 st.toast(f"Top {rank} de @{perfil} salvo!", icon="💾")
             except Exception as e:
                 st.error(f"Erro ao salvar linha no Excel: {e}")
