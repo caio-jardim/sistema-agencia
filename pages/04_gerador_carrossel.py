@@ -75,73 +75,82 @@ def verificar_existencia_db(client, aba_nome, url_input):
     Retorna o texto da transcrição se existir, ou None.
     """
     try:
-        sh = client.open("DB_E21_Conteudos")
+        try:
+            sh = client.open("DB_E21_Conteudos") # NOME AJUSTADO
+        except gspread.exceptions.SpreadsheetNotFound:
+            st.error("❌ A planilha 'DB_E21_Conteudos' não foi encontrada.")
+            return None
+            
         try:
             worksheet = sh.worksheet(aba_nome)
         except:
-            # Se a aba não existe, cria com os cabeçalhos corretos
+            # Se a aba não existe, cria com os cabeçalhos (incluindo Legenda agora)
             worksheet = sh.add_worksheet(title=aba_nome, rows="1000", cols="20")
             if aba_nome == "instagram":
-                worksheet.append_row(["ID_Unico", "Data_Coleta", "Perfil", "Data_Postagem", "URL_Original", "Views", "Likes", "Comments", "Transcricao_Whisper", "Gancho_Verbal"])
+                worksheet.append_row(["ID_Unico", "Data_Coleta", "Perfil", "Data_Postagem", "URL_Original", "Views", "Likes", "Comments", "Transcricao_Whisper", "Gancho_Verbal", "Legenda"])
             else:
-                worksheet.append_row(["ID_Unico", "Data_Coleta", "Perfil", "Data_Postagem", "URL_Original", "Views", "Likes", "Comments", "Transcricao_Whisper"])
+                worksheet.append_row(["ID_Unico", "Data_Coleta", "Perfil", "Data_Postagem", "URL_Original", "Views", "Likes", "Comments", "Transcricao_Whisper", "Legenda"])
         
         # Procura a URL na coluna 5 (URL_Original)
-        # Nota: O gspread cell.col começa em 1. A coluna E é a 5.
         try:
             cell = worksheet.find(url_input)
             if cell:
-                # Se achou, pega a Transcrição (Coluna 9 - I)
-                # linha = cell.row
                 row_values = worksheet.row_values(cell.row)
                 # A transcrição é o índice 8 (coluna 9)
                 if len(row_values) >= 9:
                     return row_values[8] # Retorna a transcrição
         except gspread.exceptions.CellNotFound:
             return None
+        except Exception as e:
+            return None
             
         return None
     except Exception as e:
-        st.warning(f"Não foi possível ler o banco de dados: {e}")
+        st.warning(f"Erro ao ler banco de dados (ignorando verificação): {e}")
         return None
 
 def salvar_no_db(client, aba_nome, dados):
     """Salva uma nova linha na planilha"""
     try:
-        sh = client.open("DB_E21_Conteudos")
+        sh = client.open("DB_E21_Conteudos") # NOME AJUSTADO
         worksheet = sh.worksheet(aba_nome)
         
-        # Prepara a linha baseada na estrutura pedida
+        # Limpa o texto da legenda para não quebrar a planilha (remove tabs e quebras excessivas)
+        legenda_limpa = str(dados.get("caption", "")).replace("\t", " ").replace("\n", " ")[:4000] 
+
         if aba_nome == "instagram":
+            # Ordem: ID, Data, Perfil, Postagem, URL, Views, Likes, Comments, Transcricao, Gancho, Legenda
             row = [
-                dados.get("id_unico", ""),
-                datetime.now().strftime("%d/%m/%Y"), # Data Coleta
-                dados.get("perfil", ""),
-                dados.get("data_postagem", ""),
-                dados.get("url", ""),
+                str(dados.get("id_unico", "")),
+                datetime.now().strftime("%d/%m/%Y"),
+                str(dados.get("perfil", "")),
+                str(dados.get("data_postagem", "")),
+                str(dados.get("url", "")),
                 dados.get("views", 0),
                 dados.get("likes", 0),
                 dados.get("comments", 0),
-                dados.get("transcricao", ""),
-                dados.get("gancho_verbal", "") # Extra para Insta
+                str(dados.get("transcricao", "")),
+                str(dados.get("gancho_verbal", "")),
+                legenda_limpa # Nova Coluna
             ]
         else: # Youtube
             row = [
-                dados.get("id_unico", ""),
+                str(dados.get("id_unico", "")),
                 datetime.now().strftime("%d/%m/%Y"),
-                dados.get("perfil", ""),
-                dados.get("data_postagem", ""),
-                dados.get("url", ""),
+                str(dados.get("perfil", "")),
+                str(dados.get("data_postagem", "")),
+                str(dados.get("url", "")),
                 dados.get("views", 0),
                 dados.get("likes", 0),
                 dados.get("comments", 0),
-                dados.get("transcricao", "")
+                str(dados.get("transcricao", "")),
+                legenda_limpa # Nova Coluna (Descrição)
             ]
             
         worksheet.append_row(row)
         return True
     except Exception as e:
-        st.error(f"Erro ao salvar no Banco de Dados: {e}")
+        st.error(f"Erro ao salvar no Banco de Dados (mas o carrossel será gerado): {e}")
         return False
 
 # ==========================================
@@ -151,23 +160,17 @@ def salvar_no_db(client, aba_nome, dados):
 SYSTEM_PROMPT_TEMPESTADE = """
 VOCÊ É: Um Estrategista de Conteúdo Viral e Analista de Atenção.
 SUA MISSÃO: Analisar o CONTEÚDO BASE e Gerar estruturas de conteúdo validadas psicologicamente.
-O QUE VOCÊ NÃO FAZ: Você NÃO escreve roteiros, NÃO escreve legendas, NÃO escreve copy final. Você entrega a ESTRUTURA.
-
-TOM DE VOZ:
-- Analítico, cirúrgico e "Sênior".
-- Foco em: "Por que isso funciona?" (Psicologia do consumidor).
-- Zero "encher linguiça". Vá direto à estrutura.
 
 FORMATO DE RESPOSTA (JSON ESTRITO):
 Você deve retornar APENAS um JSON válido contendo um array de objetos. 
-Não use Markdown. Não escreva nada antes ou depois do JSON.
+NÃO escreva introduções, NÃO escreva conclusões. Apenas o JSON puro.
 
 Estrutura obrigatória:
 [
   {
-    "titulo": "Título Curto e Impactante",
-    "estrutura": "Nome técnico da estrutura (ex: Quebra de Padrão, Lista Invertida)",
-    "por_que_funciona": "Explicação estratégica de como isso muda a percepção ou ataca uma crença"
+    "titulo": "Título Curto",
+    "estrutura": "Nome técnico",
+    "por_que_funciona": "Explicação"
   },
   ... (total de 3 itens)
 ]
@@ -177,41 +180,22 @@ SYSTEM_PROMPT_ARQUITETO = """
 VOCÊ É: Um Engenheiro de Atenção e Estrategista de Narrativas (Nível Sênior).
 Sua especialidade é criar roteiros de carrossel que geram "Stop Scroll" imediato.
 
-## SEU PRIMEIRO PASSO (CRÍTICO): DEFINIR O TAMANHO
-Antes de escrever, analise a complexidade do tema para definir a quantidade de slides.
-Siga esta regra de "Engenharia de Tensão":
+## SEU PRIMEIRO PASSO: DEFINIR O TAMANHO
+1. [Nível Simples] (5 Slides)
+2. [Zona Ideal] (7 a 9 Slides)
+3. [Nível Blindado] (10 a 12 Slides)
 
-1. [Nível Simples] (5 Slides):
-   - Use para: Temas com um único conflito ou dicas rápidas.
-   - Estrutura: Gancho -> Erro -> Tese -> Explicação -> Fechamento.
-
-2. [Zona Ideal] (7 a 9 Slides) -> **PREFERÊNCIA PADRÃO**:
-   - Use para: A maioria dos temas virais.
-   - Estrutura: Ato 1 (Choque) -> Ato 2 (Conflito + Explicação) -> Ato 3 (Síntese).
-
-3. [Nível Blindado] (10 a 12 Slides):
-   - Use para: Quebrar mitos muito fortes ou temas polêmicos que exigem muita defesa ("blindagem").
-
-*REGRA DE OURO:* Cada slide deve ter uma "virada de pensamento". Se o raciocínio acabou, o carrossel acaba. Não encha linguiça.
-
-## SUAS FERRAMENTAS (GATILHOS MENTAIS):
-Ao escrever a "Nota de Engenharia" (no JSON), escolha um destes:
-- [Paradoxo]: Uma verdade que parece mentira.
-- [Inimigo Comum]: Culpar algo externo.
-- [Quebra de Padrão]: Dizer o oposto do guru motivacional.
-- [Tensão Latente]: A sensação de que algo vai dar errado.
-- [Substituição de Herói]: Tirar o foco do esforço e colocar na estratégia.
-- [Open Loop]: Abrir uma questão que só se resolve no final.
-
-## DIRETRIZES DE ESTILO:
-1. TEXTO VISUAL: Use quebras de linha (\\n). Máximo 2 frases por bloco.
-2. TOM ÁCIDO: Seja direto. Corte palavras de transição.
-3. ZERO OBVIEDADE: Nada de "Seja resiliente". Seja contra-intuitivo.
+## SUAS FERRAMENTAS (GATILHOS):
+- [Paradoxo]
+- [Inimigo Comum]
+- [Quebra de Padrão]
+- [Tensão Latente]
+- [Substituição de Herói]
+- [Open Loop]
 
 ## FORMATO DE SAÍDA (JSON OBRIGATÓRIO):
-Você deve retornar APENAS um objeto JSON. Sem Markdown, sem ```json```, sem intro.
+Retorne APENAS um objeto JSON.
 
-Estrutura JSON:
 {
   "meta_dados": {
     "tema": "Tema recebido",
@@ -221,9 +205,9 @@ Estrutura JSON:
   "carrossel": [
     {
       "painel": 1,
-      "fase": "Gancho / Tensão / Virada / Fechamento",
-      "texto": "Texto do slide aqui...",
-      "nota_engenharia": "[Gatilho] Explicação técnica..."
+      "fase": "Gancho",
+      "texto": "Texto aqui...",
+      "nota_engenharia": "[Gatilho] Explicação..."
     }
   ]
 }
@@ -232,19 +216,31 @@ Estrutura JSON:
 # --- FUNÇÕES AUXILIARES ---
 
 def limpar_json(texto):
-    """Limpa formatação markdown que a IA possa colocar no JSON"""
-    texto = texto.replace("```json", "").replace("```", "")
-    start = texto.find("{") # Procura chaves (objeto)
-    if start == -1: start = texto.find("[") # Ou colchetes (array)
-    end_obj = texto.rfind("}")
+    """
+    Limpa de forma CIRÚRGICA para garantir JSON válido.
+    Encontra o primeiro '[' e o último ']'. Corta todo o resto.
+    Isso resolve o erro 'Extra data'.
+    """
+    texto = texto.replace("```json", "").replace("```", "").strip()
+    
+    # Busca por ARRAY (Lista de ideias)
+    start_arr = texto.find("[")
     end_arr = texto.rfind("]")
-    end = max(end_obj, end_arr) + 1
-    if start != -1 and end != -1:
-        return texto[start:end]
-    return texto
+    
+    # Busca por OBJETO (Roteiro final)
+    start_obj = texto.find("{")
+    end_obj = texto.rfind("}")
+    
+    # Decide qual usar (prioriza array se o prompt pediu lista)
+    if start_arr != -1 and end_arr != -1 and (start_obj == -1 or start_arr < start_obj):
+        return texto[start_arr:end_arr+1]
+        
+    if start_obj != -1 and end_obj != -1:
+        return texto[start_obj:end_obj+1]
+        
+    return texto # Se não achou nada, retorna original (vai dar erro, mas é o que temos)
 
 def get_youtube_metadata(url):
-    """Extrai metadados do YouTube sem baixar o vídeo"""
     ydl_opts = {'quiet': True, 'no_warnings': True}
     try:
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
@@ -252,17 +248,17 @@ def get_youtube_metadata(url):
             return {
                 "id_unico": info.get('id'),
                 "perfil": info.get('uploader') or info.get('channel'),
-                "data_postagem": info.get('upload_date'), # Formato YYYYMMDD
+                "data_postagem": info.get('upload_date'),
                 "views": info.get('view_count'),
                 "likes": info.get('like_count'),
                 "comments": info.get('comment_count'),
-                "title": info.get('title')
+                "title": info.get('title'),
+                "caption": info.get('description', '')
             }
     except:
         return {}
 
 def download_youtube_audio(url):
-    """Baixa áudio do YouTube usando yt-dlp (Modo Android)"""
     output_filename = "temp_yt_audio"
     ydl_opts = {
         'format': 'bestaudio/best',
@@ -289,7 +285,6 @@ def download_youtube_audio(url):
             return None
 
 def get_instagram_data_apify(url):
-    """Usa Apify para pegar dados do post"""
     run_input = {
         "directUrls": [url],
         "resultsType": "posts",
@@ -348,6 +343,8 @@ def agente_tempestade_ideias(conteudo_base):
         return json.loads(texto_limpo)
     except Exception as e:
         st.error(f"Erro na IA Tempestade: {e}")
+        # Mostra o texto bruto para debug se falhar
+        # st.text_area("JSON Bruto Recebido (Erro)", completion.choices[0].message.content)
         return None
 
 def agente_arquiteto_carrossel(ideia_escolhida, conteudo_base):
@@ -400,15 +397,14 @@ if st.button("⚡ Analisar e Gerar Conceitos", type="primary"):
         
         # 1. CONEXÃO COM BANCO DE DADOS
         gs_client = conectar_sheets()
-        if not gs_client:
-            status.update(label="Erro no Banco de Dados", state="error")
-            st.stop()
-            
+        
         aba_alvo = "Youtube" if tipo_conteudo == "YouTube" else "instagram"
+        transcricao_db = None
         
         # 2. VERIFICA SE JÁ EXISTE (ECONOMIA DE CRÉDITOS)
-        status.write(f"🔎 Verificando se link já existe na aba '{aba_alvo}'...")
-        transcricao_db = verificar_existencia_db(gs_client, aba_alvo, url_input)
+        if gs_client:
+            status.write(f"🔎 Verificando se link já existe na aba '{aba_alvo}'...")
+            transcricao_db = verificar_existencia_db(gs_client, aba_alvo, url_input)
         
         if transcricao_db:
             status.write("✅ Encontrado no Banco de Dados! Usando dados salvos.")
@@ -421,7 +417,6 @@ if st.button("⚡ Analisar e Gerar Conceitos", type="primary"):
             dados_para_salvar = {}
             
             if tipo_conteudo == "YouTube":
-                # Pega Metadados
                 meta = get_youtube_metadata(url_input)
                 dados_para_salvar = {
                     "id_unico": meta.get('id_unico', ''),
@@ -430,7 +425,8 @@ if st.button("⚡ Analisar e Gerar Conceitos", type="primary"):
                     "url": url_input,
                     "views": meta.get('views', 0),
                     "likes": meta.get('likes', 0),
-                    "comments": meta.get('comments', 0)
+                    "comments": meta.get('comments', 0),
+                    "caption": meta.get('caption', '') # Add caption (descrição)
                 }
                 
                 status.write("⬇️ Baixando áudio...")
@@ -445,7 +441,6 @@ if st.button("⚡ Analisar e Gerar Conceitos", type="primary"):
                 data = get_instagram_data_apify(url_input)
                 
                 if data:
-                    # Prepara dados para salvar
                     dados_para_salvar = {
                         "id_unico": data.get('id', ''),
                         "perfil": data.get('ownerUsername', ''),
@@ -453,7 +448,8 @@ if st.button("⚡ Analisar e Gerar Conceitos", type="primary"):
                         "url": url_input,
                         "views": data.get('videoViewCount') or data.get('playCount', 0),
                         "likes": data.get('likesCount', 0),
-                        "comments": data.get('commentsCount', 0)
+                        "comments": data.get('commentsCount', 0),
+                        "caption": data.get('caption', '') # Add caption (legenda)
                     }
 
                     if tipo_conteudo == "Reels (Instagram)":
@@ -476,10 +472,9 @@ if st.button("⚡ Analisar e Gerar Conceitos", type="primary"):
                         alts = [c.get('alt') for c in (data.get('childPosts') or []) if c.get('alt')]
                         texto_extraido = f"LEGENDA:\n{cap}\nVISUAL:\n{' '.join(alts)}"
 
-            # 4. SALVAMENTO NO BANCO (SE FOI EXTRAÍDO AGORA)
-            if texto_extraido:
+            # 4. SALVAMENTO NO BANCO
+            if texto_extraido and gs_client:
                 dados_para_salvar["transcricao"] = texto_extraido
-                # Gancho verbal simples (primeiros 100 chars) para Insta
                 if aba_alvo == "instagram":
                     dados_para_salvar["gancho_verbal"] = texto_extraido[:100] + "..."
                 
@@ -496,7 +491,7 @@ if st.button("⚡ Analisar e Gerar Conceitos", type="primary"):
                 st.session_state['ideias_geradas'] = ideias
                 status.update(label="Processo Finalizado!", state="complete", expanded=False)
             else:
-                status.update(label="Erro na IA", state="error")
+                status.update(label="Erro na IA (Formato JSON)", state="error")
         else:
             status.update(label="Falha na extração", state="error")
 
@@ -540,7 +535,6 @@ if 'ideia_ativa' in st.session_state:
             
     roteiro = st.session_state.get('roteiro_final')
     if roteiro and 'carrossel' in roteiro:
-        # Exibe Metadados
         meta = roteiro.get('meta_dados', {})
         if meta:
             c1, c2, c3 = st.columns(3)
