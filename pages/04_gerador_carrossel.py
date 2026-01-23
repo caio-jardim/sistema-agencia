@@ -456,11 +456,9 @@ def agente_arquiteto_carrossel(ideia_escolhida, conteudo_base):
         return None
 
 # --- INTERFACE PRINCIPAL ---
-# ... (código anterior das funções) ...
+# --- INTERFACE PRINCIPAL & SIDEBAR ---
 
-# --- INTERFACE PRINCIPAL ---
-
-# [NOVO] Adicione este bloco aqui:
+# 1. Sidebar de Cookies (Para resolver o erro do YouTube)
 with st.sidebar:
     st.header("⚙️ Configurações YouTube")
     youtube_cookies = st.text_area(
@@ -469,10 +467,7 @@ with st.sidebar:
         help="Use a extensão 'Get cookies.txt LOCALLY' no Chrome para pegar seus cookies logado no YouTube."
     )
 
-# [CÓDIGO JÁ EXISTENTE ABAIXO]
-tipo_conteudo = st.radio("Qual a origem da ideia?", ["YouTube", "Reels (Instagram)", "Carrossel (Instagram)"], horizontal=True)
-url_input = st.text_input(f"Cole o link do {tipo_conteudo}:", placeholder="https://...")
-
+# 2. Escolha do Conteúdo (APENAS UMA VEZ)
 tipo_conteudo = st.radio("Qual a origem da ideia?", ["YouTube", "Reels (Instagram)", "Carrossel (Instagram)"], horizontal=True)
 url_input = st.text_input(f"Cole o link do {tipo_conteudo}:", placeholder="https://...")
 
@@ -524,6 +519,7 @@ if st.button("⚡ Analisar e Gerar Conceitos", type="primary"):
                 }
                 
                 status.write("⬇️ Baixando áudio...")
+                # Passa os cookies da sidebar
                 f = download_youtube_audio(url_input, youtube_cookies)
                 if f:
                     status.write("👂 Transcrevendo (Groq)...")
