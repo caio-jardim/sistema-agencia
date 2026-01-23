@@ -301,32 +301,61 @@ def get_youtube_metadata(url):
     except:
         return {}
 
-def download_youtube_audio(url):
+def download_youtube_audio(url, cookies_content=None):
+    """
+    Baixa áudio do YouTube. 
+    Se cookies_content for passado, usa para autenticar e evitar erro 403.
+    """
     output_filename = "temp_yt_audio"
+    
+    # Configura arquivo temporário de cookies
+    cookie_file = "cookies_temp.txt"
+    use_cookies = False
+    
+    if cookies_content and len(cookies_content) > 50:
+        with open(cookie_file, "w") as f:
+            f.write(cookies_content)
+        use_cookies = True
+    
     ydl_opts = {
         'format': 'bestaudio/best',
         'outtmpl': output_filename,
-        'extractor_args': {'youtube': {'player_client': ['android', 'ios']}},
         'postprocessors': [{'key': 'FFmpegExtractAudio','preferredcodec': 'mp3','preferredquality': '192'}],
-        'quiet': True, 'no_warnings': True, 'nocheckcertificate': True, 'noplaylist': True,
+        'quiet': True, 
+        'no_warnings': True, 
+        'nocheckcertificate': True, 
+        'noplaylist': True,
     }
+
+    # SE TIVER COOKIES, USA ELES (100% EFICAZ)
+    if use_cookies:
+        ydl_opts['cookiefile'] = cookie_file
+    else:
+        # SE NÃO, TENTA CAMUFLAGEM DE TV (MUITO FORTE)
+        ydl_opts['extractor_args'] = {
+            'youtube': {'player_client': ['tv_embedded', 'web_embedded']}
+        }
+
     try:
+        msg_modo = "Modo Cookies 🍪" if use_cookies else "Modo Camuflagem TV 📺"
+        st.info(f"🔄 Baixando áudio... ({msg_modo})")
+        
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
             ydl.download([url])
+        
+        # Limpeza
+        if os.path.exists(cookie_file): os.remove(cookie_file)
+
         final_filename = f"{output_filename}.mp3"
         if os.path.exists(final_filename): return final_filename
         if os.path.exists(output_filename): return output_filename
         return None
-    except Exception as e:
-        st.warning(f"Método Android falhou. Tentando Web Creator...")
-        try:
-            ydl_opts['extractor_args']['youtube']['player_client'] = ['web_creator']
-            with yt_dlp.YoutubeDL(ydl_opts) as ydl: ydl.download([url])
-            return f"{output_filename}.mp3"
-        except Exception as e2:
-            st.error(f"❌ Falha no download do YouTube: {e2}")
-            return None
 
+    except Exception as e:
+        if os.path.exists(cookie_file): os.remove(cookie_file)
+        st.error(f"❌ Falha no download. O YouTube bloqueou o IP. Tente pegar os cookies frescos no seu navegador e colar na barra lateral.")
+        return None
+    
 def get_instagram_data_apify(url):
     run_input = {
         "directUrls": [url],
@@ -427,6 +456,22 @@ def agente_arquiteto_carrossel(ideia_escolhida, conteudo_base):
         return None
 
 # --- INTERFACE PRINCIPAL ---
+# ... (código anterior das funções) ...
+
+# --- INTERFACE PRINCIPAL ---
+
+# [NOVO] Adicione este bloco aqui:
+with st.sidebar:
+    st.header("⚙️ Configurações YouTube")
+    youtube_cookies = st.text_area(
+        "🍪 Cookies (Anti-Bloqueio)", 
+        placeholder="Cole o conteúdo do arquivo cookies.txt aqui...",
+        help="Use a extensão 'Get cookies.txt LOCALLY' no Chrome para pegar seus cookies logado no YouTube."
+    )
+
+# [CÓDIGO JÁ EXISTENTE ABAIXO]
+tipo_conteudo = st.radio("Qual a origem da ideia?", ["YouTube", "Reels (Instagram)", "Carrossel (Instagram)"], horizontal=True)
+url_input = st.text_input(f"Cole o link do {tipo_conteudo}:", placeholder="https://...")
 
 tipo_conteudo = st.radio("Qual a origem da ideia?", ["YouTube", "Reels (Instagram)", "Carrossel (Instagram)"], horizontal=True)
 url_input = st.text_input(f"Cole o link do {tipo_conteudo}:", placeholder="https://...")
@@ -479,7 +524,7 @@ if st.button("⚡ Analisar e Gerar Conceitos", type="primary"):
                 }
                 
                 status.write("⬇️ Baixando áudio...")
-                f = download_youtube_audio(url_input)
+                f = download_youtube_audio(url_input, youtube_cookies)
                 if f:
                     status.write("👂 Transcrevendo (Groq)...")
                     texto_extraido = transcrever_audio_groq(f)
