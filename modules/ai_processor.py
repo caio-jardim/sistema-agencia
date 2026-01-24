@@ -1,18 +1,57 @@
-# modules/ai_processor.py
 import streamlit as st
 import os
 import json
 from groq import Groq
-import json
-from modules.prompts import SYSTEM_PROMPT_TEMPESTADE, SYSTEM_PROMPT_ARQUITETO, SYSTEM_PROMPT_VENDAS
 from moviepy.editor import VideoFileClip
-from modules.prompts import PROMPT_ANALISE_GANCHO 
+
+# Importa TODOS os prompts necessários (Página 01 e 04)
+from modules.prompts import (
+    PROMPT_ANALISE_GANCHO, 
+    SYSTEM_PROMPT_TEMPESTADE, 
+    SYSTEM_PROMPT_ARQUITETO, 
+    SYSTEM_PROMPT_VENDAS
+)
+
+# --- FUNÇÕES UTILITÁRIAS ---
+
+def limpar_json(texto):
+    """Limpa formatação de markdown para evitar erro de JSON"""
+    texto = texto.replace("```json", "").replace("```", "").strip()
+    start_arr = texto.find("[")
+    end_arr = texto.rfind("]")
+    start_obj = texto.find("{")
+    end_obj = texto.rfind("}")
+    
+    if start_arr != -1 and end_arr != -1 and (start_obj == -1 or start_arr < start_obj):
+        return texto[start_arr:end_arr+1]
+    if start_obj != -1 and end_obj != -1:
+        return texto[start_obj:end_obj+1]
+    return texto
+
+def transcrever_audio_groq(filepath):
+    """Transcreve áudio usando Whisper na Groq (Usado na Pag 04)"""
+    if "groq" not in st.secrets: return None
+    client = Groq(api_key=st.secrets["groq"]["api_key"])
+    try:
+        with open(filepath, "rb") as file:
+            transcription = client.audio.transcriptions.create(
+                file=(filepath, file.read()),
+                model="whisper-large-v3",
+                response_format="text"
+            )
+        return str(transcription)
+    except Exception as e:
+        st.error(f"Erro na Transcrição: {e}")
+        return None
+
+# --- FUNÇÕES PARA PÁGINA 01 (INSTAGRAM ANALYZER) ---
 
 def analisar_video_groq(video_path, status_box):
+    """Extrai áudio, transcreve e analisa ganchos (Usado na Pag 01)"""
     if "groq" in st.secrets and "api_key" in st.secrets["groq"]:
         client_groq = Groq(api_key=st.secrets["groq"]["api_key"])
     else:
-        client_groq = Groq(api_key=st.secrets.get("groq_api_key"))
+        return {"transcricao": "Erro: Chave Groq não configurada", "ganchos_verbais": "-"}
 
     audio_path = video_path.replace(".mp4", ".mp3")
 
@@ -36,7 +75,6 @@ def analisar_video_groq(video_path, status_box):
 
         status_box.write("🧠 Analisando com Llama 3...")
         
-        # Usa o prompt que importamos
         prompt_final = PROMPT_ANALISE_GANCHO.format(
             texto_transcrito=texto_transcrito_completo[:4000]
         )
@@ -63,50 +101,22 @@ def analisar_video_groq(video_path, status_box):
         if os.path.exists(audio_path): os.remove(audio_path)
         return {"transcricao": "Erro API", "ganchos_verbais": "-"}
 
-def limpar_json(texto):
-    texto = texto.replace("```json", "").replace("```", "").strip()
-    start_arr = texto.find("[")
-    end_arr = texto.rfind("]")
-    start_obj = texto.find("{")
-    end_obj = texto.rfind("}")
-    
-    if start_arr != -1 and end_arr != -1 and (start_obj == -1 or start_arr < start_obj):
-        return texto[start_arr:end_arr+1]
-    if start_obj != -1 and end_obj != -1:
-        return texto[start_obj:end_obj+1]
-    return texto
-
-def transcrever_audio_groq(filepath):
-    if "groq" not in st.secrets: return None
-    client = Groq(api_key=st.secrets["groq"]["api_key"])
-    try:
-        with open(filepath, "rb") as file:
-            transcription = client.audio.transcriptions.create(
-                file=(filepath, file.read()),
-                model="whisper-large-v3",
-                response_format="text"
-            )
-        return str(transcription)
-    except Exception as e:
-        st.error(f"Erro na Transcrição: {e}")
-        return None
+# --- FUNÇÕES PARA PÁGINA 04 (GERADOR DE CARROSSEL) ---
 
 def agente_tempestade_ideias(conteudo_base, modo="Conteúdo (Viral)"):
     """
-    Gera conceitos baseados no modo escolhido.
-    modo: "Conteúdo (Viral)" ou "Vendas (Mentor)"
+    Gera conceitos baseados no modo escolhido (Viral ou Mentor).
     """
     if "groq" not in st.secrets: return None
     client = Groq(api_key=st.secrets["groq"]["api_key"])
     
-    # Seleção do Prompt do Sistema
+    # Lógica de Seleção de Persona
     if modo == "Vendas (Mentor)":
         system_prompt = SYSTEM_PROMPT_VENDAS
-        # Reforço específico para o Mentor focar em conversão/vendas no JSON
-        instruction_extra = "Foque 100% em conversão, quebra de objeção e autoridade. Gere 3 opções em JSON."
+        instruction_extra = "ATENÇÃO: Atue no MODO A (Criação). Foque 100% em conversão, quebra de objeção e autoridade. Gere 3 opções em JSON."
     else:
         system_prompt = SYSTEM_PROMPT_TEMPESTADE
-        instruction_extra = "Foque em viralidade e retenção. Gere 3 conceitos em JSON."
+        instruction_extra = "Foque em viralidade, retenção e topo de funil. Gere 3 conceitos em JSON."
 
     try:
         prompt_user = f"""
@@ -123,17 +133,18 @@ def agente_tempestade_ideias(conteudo_base, modo="Conteúdo (Viral)"):
             ],
             model="llama-3.3-70b-versatile",
             temperature=0.5,
-            response_format={"type": "json_object"} # Garante que venha JSON
+            response_format={"type": "json_object"}
         )
         texto_limpo = limpar_json(completion.choices[0].message.content)
         return json.loads(texto_limpo)
     except Exception as e:
-        st.error(f"Erro na IA ({modo}): {e}")
+        st.error(f"Erro na IA Tempestade ({modo}): {e}")
         return None
 
-# ... (mantenha agente_arquiteto_carrossel igual) ...
-
 def agente_arquiteto_carrossel(ideia_escolhida, conteudo_base):
+    """
+    Gera o roteiro detalhado do carrossel.
+    """
     if "groq" not in st.secrets: return None
     client = Groq(api_key=st.secrets["groq"]["api_key"])
     try:
@@ -142,9 +153,9 @@ def agente_arquiteto_carrossel(ideia_escolhida, conteudo_base):
         === CONTEÚDO ORIGINAL ===
         "{conteudo_base[:12000]}" 
         =========================
-        CONCEITO: {ideia_escolhida['titulo']}
-        ESTRUTURA: {ideia_escolhida['estrutura']}
-        LÓGICA: {ideia_escolhida['por_que_funciona']}
+        CONCEITO: {ideia_escolhida.get('titulo')}
+        ESTRUTURA: {ideia_escolhida.get('estrutura')}
+        LÓGICA: {ideia_escolhida.get('por_que_funciona')}
         """
         
         completion = client.chat.completions.create(
