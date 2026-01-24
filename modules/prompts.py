@@ -16,7 +16,7 @@ PROMPT_GERADOR_LISTA_HYPE = """
 
     # Contexto
     - Data Atual: {data_hoje}
-    - Janela de Análise: {janela_tempo}
+    - Janela de Análise: {janela}
     - Nicho do Cliente: {nicho}
     - OBSERVAÇÕES E RESTRIÇÕES DO CLIENTE: "{obs}"
     (ATENÇÃO: Respeite rigorosamente as observações acima. Se pedir para evitar um tema, evite).

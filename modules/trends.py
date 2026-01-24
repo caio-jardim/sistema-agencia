@@ -32,9 +32,11 @@ def gerar_hypes_gemini(nicho, janela, tom, obs):
     model = genai.GenerativeModel('gemini-2.5-pro') 
     data_hoje = datetime.now().strftime("%d/%m/%Y")
     
+    # CORREÇÃO DO ERRO: Adicionado 'janela=janela'
     prompt_final = PROMPT_GERADOR_LISTA_HYPE.format(
         data_hoje=data_hoje,
         nicho=nicho,
+        janela=janela,  # <--- FALTAVA ISSO AQUI
         tom=tom,
         obs=obs
     )
@@ -74,6 +76,6 @@ def escrever_roteiro_groq(pauta, nicho, tom, obs):
     except Exception as e:
         return f"Erro na Groq: {e}"
 
-# Alias para corrigir erro de digitação na chamada interna
+# Alias auxiliar
 def configuring_gemini():
     return configurar_gemini()
