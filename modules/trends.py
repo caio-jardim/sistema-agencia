@@ -25,19 +25,20 @@ def configurar_gemini():
         return False
 
 def gerar_hypes_gemini(nicho, janela, tom, obs):
-    """Usa o Gemini 1.5 Flash (Rápido e Atualizado) para gerar a lista"""
-    if not configuring_gemini(): return []
+    """Usa o Gemini para gerar a lista de pautas"""
+    if not configurar_gemini(): return []
     
-    # Modelo Flash é mais rápido e barato para listas
-    model = genai.GenerativeModel('gemini-2.5-pro') 
+    # Modelo mais rápido e barato para listas
+    model = genai.GenerativeModel('gemini-1.5-flash') 
     data_hoje = datetime.now().strftime("%d/%m/%Y")
     
-    # CORREÇÃO DO ERRO: Adicionado 'janela=janela'
+    # --- AQUI ESTAVA O ERRO ---
+    # O Python estava tentando preencher o {janela} do texto, mas não tinha a variável aqui.
     prompt_final = PROMPT_GERADOR_LISTA_HYPE.format(
         data_hoje=data_hoje,
         nicho=nicho,
-        janela=janela,  # <--- FALTAVA ISSO AQUI
-        tom=tom,
+        janela=janela,  # <--- LINHA ADICIONADA (CORREÇÃO)
+        tom=tom,       # (Opcional: se seu prompt não tiver {tom}, ele ignora, mas não dá erro)
         obs=obs
     )
     
@@ -75,7 +76,4 @@ def escrever_roteiro_groq(pauta, nicho, tom, obs):
         return completion.choices[0].message.content
     except Exception as e:
         return f"Erro na Groq: {e}"
-
-# Alias auxiliar
-def configuring_gemini():
-    return configurar_gemini()
+    
