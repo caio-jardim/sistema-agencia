@@ -5,7 +5,7 @@ from modules.ui import carregar_css
 # --- CONFIGURAÇÃO ---
 st.set_page_config(
     page_title="E21 Studio",
-    page_icon="⚫", # Ícone de aba minimalista
+    page_icon="⚫", # Ícone da aba (favicon)
     layout="wide"
 )
 
@@ -17,7 +17,7 @@ if not check_password():
     st.stop()
 
 # --- ÍCONES SVG (DEFINIÇÃO) ---
-# Aqui definimos os ícones vetoriais para usar no layout
+# Ícones vetoriais elegantes na cor da marca
 ICON_CHART = """<svg width="24" height="24" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M18 20V10M12 20V4M6 20V14" stroke="#F63366" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>"""
 ICON_RADAR = """<svg width="24" height="24" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M12 22C17.5228 22 22 17.5228 22 12C22 6.47715 17.5228 2 12 2C6.47715 2 2 6.47715 2 12C2 17.5228 6.47715 22 12 22Z" stroke="#F63366" stroke-width="2"/><path d="M12 8V12L15 15" stroke="#F63366" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>"""
 ICON_LAYERS = """<svg width="24" height="24" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M12 2L2 7L12 12L22 7L12 2Z" stroke="#F63366" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/><path d="M2 17L12 22L22 17" stroke="#F63366" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/><path d="M2 12L12 17L22 12" stroke="#F63366" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>"""
@@ -54,8 +54,8 @@ with c1:
         </div>
         """, unsafe_allow_html=True)
         
-        st.page_link("pages/01_instagram_insights_reels.py", label="Acessar Módulo", icon="QRY") 
-        # Nota: O ícone aqui é limitado pelo Streamlit, mas o visual do card já está limpo.
+        # CORREÇÃO: Removido o argumento 'icon' que causava erro
+        st.page_link("pages/01_instagram_insights_reels.py", label="Acessar Módulo")
 
 # CARD 2: RADAR
 with c2:
@@ -73,7 +73,8 @@ with c2:
         </div>
         """, unsafe_allow_html=True)
         
-        st.page_link("pages/03_video_diario.py", label="Acessar Módulo", icon="SEARCH")
+        # CORREÇÃO: Removido o argumento 'icon'
+        st.page_link("pages/03_video_diario.py", label="Acessar Módulo")
 
 # CARD 3: CARROSSEL
 with c3:
@@ -91,7 +92,8 @@ with c3:
         </div>
         """, unsafe_allow_html=True)
         
-        st.page_link("pages/04_gerador_carrossel.py", label="Acessar Módulo", icon="DOC")
+        # CORREÇÃO: Removido o argumento 'icon'
+        st.page_link("pages/04_gerador_carrossel.py", label="Acessar Módulo")
 
 # --- FOOTER ---
 st.markdown("---")
