@@ -3,14 +3,14 @@ import os
 import time
 from moviepy.editor import VideoFileClip
 
-# --- IMPORTAÇÃO DOS MÓDULOS ---
+# --- IMPORTAÇÃO DOS MÓDULOS (A Mágica da Organização) ---
 from modules.auth import check_password
 from modules.database import conectar_sheets, verificar_existencia_db, salvar_no_db
 from modules.instagram import get_instagram_data_apify, download_file
 from modules.ai_processor import agente_tempestade_ideias, agente_arquiteto_carrossel, transcrever_audio_groq
-from modules.youtube_utils import pegar_dados_youtube_apify # <--- USA O MÓDULO QUE ARRUMAMOS ANTES
+from modules.youtube_utils import pegar_dados_youtube_apify 
 
-# --- CONFIGURAÇÃO ---
+# --- CONFIGURAÇÃO DA PÁGINA ---
 st.set_page_config(page_title="Gerador de Carrosséis", page_icon="🎠", layout="wide")
 st.title("🎠 Gerador de Carrosséis: Método Tempestade")
 st.markdown("Transforme qualquer conteúdo (YouTube, Reels ou Post) em estruturas validadas.")
@@ -20,13 +20,25 @@ st.markdown("---")
 if not check_password():
     st.stop()
 
-# --- SIDEBAR (Cookies não são mais necessários graças ao módulo novo, mas mantive a estrutura visual) ---
+# --- SIDEBAR ---
 with st.sidebar:
     st.header("⚙️ Configuração")
-    st.info("O sistema agora usa Apify/Cobalt para evitar bloqueios automaticamente.")
+    st.info("O sistema usa Apify/Cobalt para contornar bloqueios automaticamente.")
 
 # --- INPUTS ---
-tipo_conteudo = st.radio("Qual a origem da ideia?", ["YouTube", "Reels (Instagram)", "Carrossel (Instagram)"], horizontal=True)
+col_tipo, col_foco = st.columns([1, 1])
+
+with col_tipo:
+    tipo_conteudo = st.radio("Origem:", ["YouTube", "Reels (Instagram)", "Carrossel (Instagram)"])
+
+with col_foco:
+    # SELETOR DE MODO (Viral vs Vendas)
+    foco_analise = st.radio(
+        "Foco da IA:", 
+        ["Conteúdo (Viral)", "Vendas (Mentor)"], 
+        help="Viral: Foca em retenção e topo de funil.\nVendas: Foca em autoridade, quebra de objeção e fundo de funil."
+    )
+
 url_input = st.text_input(f"Cole o link do {tipo_conteudo}:", placeholder="https://...")
 
 # --- BOTÃO PRINCIPAL ---
@@ -43,10 +55,12 @@ if st.button("⚡ Analisar e Gerar Conceitos", type="primary"):
         texto_extraido = ""
         
         # 1. CONEXÃO COM BANCO DE DADOS
-        gs_client = conectar_sheets()
+        gs_client = conectar_sheets() # Retorna a aba, mas usamos o .spreadsheet dentro das funcoes
+        
         aba_alvo = "Youtube" if tipo_conteudo == "YouTube" else "instagram"
         transcricao_db = None
         
+        # 2. VERIFICA SE JÁ EXISTE NO BANCO
         if gs_client:
             status.write(f"🔎 Verificando DB: '{aba_alvo}'...")
             transcricao_db = verificar_existencia_db(gs_client, aba_alvo, url_input)
@@ -59,9 +73,8 @@ if st.button("⚡ Analisar e Gerar Conceitos", type="primary"):
             status.write("⚠️ Novo link. Iniciando extração...")
             dados_para_salvar = {}
             
-            # --- YOUTUBE (USA O MÓDULO ROBUSTO) ---
+            # --- EXTRAÇÃO YOUTUBE (MODULAR) ---
             if tipo_conteudo == "YouTube":
-                # Chama a função que criamos no arquivo youtube_utils.py
                 yt_data = pegar_dados_youtube_apify(url_input)
                 
                 if yt_data and yt_data.get('sucesso'):
@@ -77,10 +90,10 @@ if st.button("⚡ Analisar e Gerar Conceitos", type="primary"):
                         "caption": yt_data.get('description', '')
                     }
                 else:
-                    status.update(label="Falha no YouTube (Verifique Logs)", state="error")
+                    status.update(label="Falha no YouTube", state="error")
                     st.error("Não foi possível extrair dados do YouTube.")
 
-            # --- INSTAGRAM ---
+            # --- EXTRAÇÃO INSTAGRAM (MODULAR) ---
             elif tipo_conteudo in ["Reels (Instagram)", "Carrossel (Instagram)"]:
                 status.write("🕵️ Acessando Apify (Instagram)...")
                 data = get_instagram_data_apify(url_input)
@@ -99,6 +112,7 @@ if st.button("⚡ Analisar e Gerar Conceitos", type="primary"):
 
                     if tipo_conteudo == "Reels (Instagram)":
                         v_url = data.get('videoUrl') or data.get('video_url')
+                        # Baixa vídeo temporário para transcrever
                         if v_url and download_file(v_url, "temp.mp4"):
                             try:
                                 vc = VideoFileClip("temp.mp4")
@@ -107,7 +121,7 @@ if st.button("⚡ Analisar e Gerar Conceitos", type="primary"):
                                 status.write("👂 Transcrevendo áudio...")
                                 texto_extraido = transcrever_audio_groq("temp.mp3")
                             except Exception as e: 
-                                st.error(f"Erro processamento vídeo: {e}")
+                                st.error(f"Erro processamento áudio: {e}")
                             finally:
                                 if os.path.exists("temp.mp4"): os.remove("temp.mp4")
                                 if os.path.exists("temp.mp3"): os.remove("temp.mp3")
@@ -126,48 +140,53 @@ if st.button("⚡ Analisar e Gerar Conceitos", type="primary"):
                 status.write("💾 Salvando na Planilha...")
                 salvar_no_db(gs_client, aba_alvo, dados_para_salvar)
 
-        # 5. GERAÇÃO DAS IDEIAS
+        # 5. GERAÇÃO DAS IDEIAS (IA)
         if texto_extraido:
             st.session_state['conteudo_base'] = texto_extraido
-            status.write("🧠 Gerando conceitos estruturais...")
-            ideias = agente_tempestade_ideias(texto_extraido)
+            
+            # AQUI ACONTECE A MÁGICA DO BOTÃO NOVO
+            status.write(f"🧠 Gerando conceitos (Modo: {foco_analise})...")
+            ideias = agente_tempestade_ideias(texto_extraido, modo=foco_analise)
             
             if ideias:
                 st.session_state['ideias_geradas'] = ideias
-                status.update(label="Sucesso!", state="complete", expanded=False)
+                status.update(label="Sucesso! Ideias Geradas.", state="complete", expanded=False)
             else:
                 status.update(label="Erro na IA (JSON)", state="error")
         else:
-            status.update(label="Falha na extração", state="error")
+            status.update(label="Falha na extração ou transcrição vazia", state="error")
 
-# --- EXIBIÇÃO ---
+# --- VISUALIZAÇÃO DOS RESULTADOS ---
 if 'ideias_geradas' in st.session_state and st.session_state['ideias_geradas']:
     st.markdown("---")
-    st.subheader("⛈️ Estruturas Identificadas")
+    st.subheader(f"⛈️ Estruturas Identificadas ({foco_analise})")
     
     ideias = st.session_state['ideias_geradas']
     
     for i, ideia in enumerate(ideias):
         with st.container(border=True):
             col_txt, col_btn = st.columns([4, 1])
+            
             with col_txt:
-                st.markdown(f"### {i+1}. {ideia['titulo']}")
-                st.caption(f"📐 {ideia['estrutura']}")
-                st.write(f"💡 {ideia['por_que_funciona']}")
+                st.markdown(f"### {i+1}. {ideia.get('titulo', 'Sem Título')}")
+                st.caption(f"📐 **Estrutura:** {ideia.get('estrutura', '-')}")
+                st.write(f"💡 {ideia.get('por_que_funciona', '-')}")
+            
             with col_btn:
+                st.write("")
                 st.write("")
                 if st.button("🎨 Gerar Carrossel", key=f"btn_car_{i}"):
                     st.session_state['ideia_ativa'] = ideia
                     st.session_state['roteiro_final'] = None 
                     st.rerun()
 
-# --- ROTEIRO FINAL ---
+# --- GERAÇÃO DO ROTEIRO FINAL ---
 if 'ideia_ativa' in st.session_state:
     st.markdown("---")
-    st.info(f"🏗️ Projetando: **{st.session_state['ideia_ativa']['titulo']}**")
+    st.info(f"🏗️ Projetando Carrossel: **{st.session_state['ideia_ativa'].get('titulo')}**")
     
     if st.session_state.get('roteiro_final') is None:
-        with st.spinner("Escrevendo slides..."):
+        with st.spinner("O Arquiteto está desenhando os slides..."):
             roteiro_json = agente_arquiteto_carrossel(
                 st.session_state['ideia_ativa'], 
                 st.session_state.get('conteudo_base', '')
@@ -184,7 +203,7 @@ if 'ideia_ativa' in st.session_state:
             c2.metric("Slides", meta.get('total_slides', '-'))
             c3.caption(f"Tema: {meta.get('tema', '-')}")
             
-        st.success("Roteiro Pronto!")
+        st.success("Projeto Finalizado! 👇")
         
         for slide in roteiro['carrossel']:
             with st.container(border=True):

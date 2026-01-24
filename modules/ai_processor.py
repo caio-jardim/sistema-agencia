@@ -4,7 +4,7 @@ import os
 import json
 from groq import Groq
 import json
-from modules.prompts import SYSTEM_PROMPT_TEMPESTADE, SYSTEM_PROMPT_ARQUITETO
+from modules.prompts import SYSTEM_PROMPT_TEMPESTADE, SYSTEM_PROMPT_ARQUITETO, SYSTEM_PROMPT_VENDAS
 from moviepy.editor import VideoFileClip
 from modules.prompts import PROMPT_ANALISE_GANCHO 
 
@@ -91,24 +91,47 @@ def transcrever_audio_groq(filepath):
         st.error(f"Erro na Transcrição: {e}")
         return None
 
-def agente_tempestade_ideias(conteudo_base):
+def agente_tempestade_ideias(conteudo_base, modo="Conteúdo (Viral)"):
+    """
+    Gera conceitos baseados no modo escolhido.
+    modo: "Conteúdo (Viral)" ou "Vendas (Mentor)"
+    """
     if "groq" not in st.secrets: return None
     client = Groq(api_key=st.secrets["groq"]["api_key"])
+    
+    # Seleção do Prompt do Sistema
+    if modo == "Vendas (Mentor)":
+        system_prompt = SYSTEM_PROMPT_VENDAS
+        # Reforço específico para o Mentor focar em conversão/vendas no JSON
+        instruction_extra = "Foque 100% em conversão, quebra de objeção e autoridade. Gere 3 opções em JSON."
+    else:
+        system_prompt = SYSTEM_PROMPT_TEMPESTADE
+        instruction_extra = "Foque em viralidade e retenção. Gere 3 conceitos em JSON."
+
     try:
-        prompt_user = f"Analise este conteúdo e gere 3 conceitos:\n\nCONTEÚDO BASE:\n{conteudo_base[:12000]}"
+        prompt_user = f"""
+        {instruction_extra}
+        
+        CONTEÚDO BASE PARA ANÁLISE:
+        {conteudo_base[:12000]}
+        """
+        
         completion = client.chat.completions.create(
             messages=[
-                {"role": "system", "content": SYSTEM_PROMPT_TEMPESTADE},
+                {"role": "system", "content": system_prompt},
                 {"role": "user", "content": prompt_user}
             ],
             model="llama-3.3-70b-versatile",
             temperature=0.5,
+            response_format={"type": "json_object"} # Garante que venha JSON
         )
         texto_limpo = limpar_json(completion.choices[0].message.content)
         return json.loads(texto_limpo)
     except Exception as e:
-        st.error(f"Erro na IA Tempestade: {e}")
+        st.error(f"Erro na IA ({modo}): {e}")
         return None
+
+# ... (mantenha agente_arquiteto_carrossel igual) ...
 
 def agente_arquiteto_carrossel(ideia_escolhida, conteudo_base):
     if "groq" not in st.secrets: return None
