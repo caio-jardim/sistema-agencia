@@ -306,16 +306,17 @@ def get_youtube_metadata(url):
 
 def download_youtube_audio(url, cookies_content=None):
     """
-    Baixa áudio do YouTube usando uma API Intermediária (Cobalt/SaveFrom Logic).
-    Isso contorna 100% o bloqueio de IP do YouTube, pois quem baixa é o servidor deles.
+    Baixa áudio usando APIs Intermediárias (Cobalt/SaveFrom Logic).
+    Isso evita 100% o bloqueio de IP do YouTube no Streamlit Cloud.
     """
     output_filename = "temp_yt_audio.mp3"
     
-    # 1. Tenta usar a API do Cobalt (Melhor alternativa atual ao SaveFrom)
-    # Documentação: https://github.com/imputnet/cobalt
+    # Lista de servidores intermediários (Cobalt Instances)
+    # Esses servidores baixam o vídeo lá e nos entregam o arquivo pronto
     api_instances = [
         "https://api.cobalt.tools/api/json",
         "https://cobalt.api.kwiatekmiki.pl/api/json",
+        "https://api.fnky.app/api/json"
     ]
     
     headers = {
@@ -331,21 +332,24 @@ def download_youtube_audio(url, cookies_content=None):
         "filenamePattern": "classic"
     }
 
-    st.info("🔄 Tentando download via Servidor Intermediário (Cobalt)...")
+    st.info("🔄 Tentando download via Servidor Intermediário (Bypassing IP Block)...")
 
+    # Tenta em cada servidor da lista até conseguir
     for api_url in api_instances:
         try:
-            # Passo 1: Pedir o link de download para o intermediário
+            # 1. Pede o link de download para a API
             response = requests.post(api_url, json=payload, headers=headers, timeout=15)
             
             if response.status_code == 200:
                 data = response.json()
                 
+                # A API retorna uma URL direta para o arquivo mp3
                 if 'url' in data:
                     download_link = data['url']
                     
-                    # Passo 2: Baixar o arquivo do link gerado
-                    with requests.get(download_link, stream=True, timeout=60) as r:
+                    # 2. Baixa o arquivo mp3 gerado
+                    st.write(f"⬇️ Baixando arquivo processado de: {api_url.split('/')[2]}...")
+                    with requests.get(download_link, stream=True, timeout=120) as r:
                         r.raise_for_status()
                         with open(output_filename, 'wb') as f:
                             for chunk in r.iter_content(chunk_size=8192):
@@ -355,52 +359,12 @@ def download_youtube_audio(url, cookies_content=None):
                         return output_filename
             
         except Exception as e:
-            print(f"Instância {api_url} falhou: {e}")
-            continue # Tenta o próximo servidor
+            print(f"Instância {api_url} falhou, tentando próxima...")
+            continue 
 
-    # 2. Se falhar, tenta yt-dlp como última esperança (com cookies se houver)
-    # (Manteve-se o código antigo aqui como fallback)
-    st.warning("⚠️ Intermediário falhou. Tentando conexão direta (pode falhar se IP estiver bloqueado)...")
-    
-    try:
-        import yt_dlp
-        cookie_file = "cookies_temp.txt"
-        use_cookies = False
-        if cookies_content and len(cookies_content) > 50:
-            with open(cookie_file, "w") as f: f.write(cookies_content)
-            use_cookies = True
-            
-        ydl_opts = {
-            'format': 'bestaudio/best',
-            'outtmpl': 'temp_yt_audio', # Sem extensão, deixa o yt-dlp decidir
-            'quiet': True,
-            'no_warnings': True,
-            'ignoreerrors': True,
-        }
-        if use_cookies: ydl_opts['cookiefile'] = cookie_file
-        
-        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-            ydl.download([url])
-            
-        if os.path.exists(cookie_file): os.remove(cookie_file)
-        
-        # Procura o arquivo gerado (pode ser .mp3, .m4a, .webm)
-        for ext in ['.mp3', '.m4a', '.webm']:
-            fname = f"temp_yt_audio{ext}"
-            if os.path.exists(fname):
-                # Renomeia para .mp3 se necessário (para o resto do código funcionar)
-                if ext != '.mp3':
-                    try:
-                        os.rename(fname, output_filename)
-                        return output_filename
-                    except: pass
-                return fname
-                
-    except Exception as e:
-        st.error(f"❌ Falha total: {e}")
-        
+    st.error("❌ Todos os servidores intermediários falharam. O vídeo pode ter restrição de idade ou região.")
     return None
-  
+ 
 def get_instagram_data_apify(url):
     run_input = {
         "directUrls": [url],
