@@ -76,27 +76,27 @@ def verificar_existencia_db(client, aba_nome, url_input):
     """
     try:
         try:
-            sh = client.open("DB_E21_Conteudos") # Nome correto
+            sh = client.open("DB_E21_Conteudos")
         except gspread.exceptions.SpreadsheetNotFound:
             st.error("❌ A planilha 'DB_E21_Conteudos' não foi encontrada.")
             return None
             
+        # Tenta abrir a aba. Se não existir (WorksheetNotFound), cria.
         try:
             worksheet = sh.worksheet(aba_nome)
-        except:
-            # Se a aba não existe, cria com os cabeçalhos
+        except gspread.exceptions.WorksheetNotFound:
+            # Só entra aqui se REALMENTE não existir
             worksheet = sh.add_worksheet(title=aba_nome, rows="1000", cols="20")
             if aba_nome == "instagram":
                 worksheet.append_row(["ID_Unico", "Data_Coleta", "Perfil", "Data_Postagem", "URL_Original", "Views", "Likes", "Comments", "Transcricao_Whisper", "Gancho_Verbal", "Legenda"])
             else:
                 worksheet.append_row(["ID_Unico", "Data_Coleta", "Perfil", "Data_Postagem", "URL_Original", "Views", "Likes", "Comments", "Transcricao_Whisper", "Legenda"])
         
-        # Procura a URL na coluna 5 (URL_Original)
+        # Procura a URL
         try:
             cell = worksheet.find(url_input)
             if cell:
                 row_values = worksheet.row_values(cell.row)
-                # A transcrição é o índice 8 (coluna 9)
                 if len(row_values) >= 9:
                     return row_values[8] # Retorna a transcrição
         except gspread.exceptions.CellNotFound:
@@ -106,7 +106,10 @@ def verificar_existencia_db(client, aba_nome, url_input):
             
         return None
     except Exception as e:
-        st.warning(f"Erro ao ler banco de dados (ignorando verificação): {e}")
+        # Se der erro de "Already exists" aqui, ignoramos e seguimos
+        if "already exists" in str(e):
+            return None
+        st.warning(f"Aviso no banco de dados: {e}")
         return None
 
 def salvar_no_db(client, aba_nome, dados):
@@ -303,59 +306,72 @@ def get_youtube_metadata(url):
 
 def download_youtube_audio(url, cookies_content=None):
     """
-    Baixa áudio do YouTube. 
-    Se cookies_content for passado, usa para autenticar e evitar erro 403.
+    Baixa áudio do YouTube com Cookies e Headers para evitar erro 403.
     """
     output_filename = "temp_yt_audio"
-    
-    # Configura arquivo temporário de cookies
     cookie_file = "cookies_temp.txt"
     use_cookies = False
     
+    # Prepara o arquivo de cookies
     if cookies_content and len(cookies_content) > 50:
         with open(cookie_file, "w") as f:
             f.write(cookies_content)
         use_cookies = True
     
+    # Configuração BLINDADA do yt-dlp
     ydl_opts = {
-        'format': 'bestaudio/best',
+        'format': 'bestaudio/best', # Tenta o melhor áudio, se falhar, pega o melhor geral
         'outtmpl': output_filename,
-        'postprocessors': [{'key': 'FFmpegExtractAudio','preferredcodec': 'mp3','preferredquality': '192'}],
-        'quiet': True, 
-        'no_warnings': True, 
-        'nocheckcertificate': True, 
-        'noplaylist': True,
+        'postprocessors': [{
+            'key': 'FFmpegExtractAudio',
+            'preferredcodec': 'mp3',
+            'preferredquality': '192',
+        }],
+        'quiet': False, # Mudei para False para ver logs se precisar
+        'no_warnings': True,
+        'nocheckcertificate': True,
+        'ignoreerrors': True, # Não trava se der erro num formato específico
+        
+        # Headers para fingir ser um Chrome Windows (deve bater com seus cookies)
+        'http_headers': {
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+            'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+            'Accept-Language': 'en-us,en;q=0.5',
+        }
     }
 
-    # SE TIVER COOKIES, USA ELES (100% EFICAZ)
     if use_cookies:
         ydl_opts['cookiefile'] = cookie_file
     else:
-        # SE NÃO, TENTA CAMUFLAGEM DE TV (MUITO FORTE)
+        # Se não tem cookies, usa a tática da TV
         ydl_opts['extractor_args'] = {
-            'youtube': {'player_client': ['tv_embedded', 'web_embedded']}
+            'youtube': {'player_client': ['android', 'web']}
         }
 
     try:
-        msg_modo = "Modo Cookies 🍪" if use_cookies else "Modo Camuflagem TV 📺"
-        st.info(f"🔄 Baixando áudio... ({msg_modo})")
+        st.info(f"🔄 Baixando YouTube... ({'Com Cookies' if use_cookies else 'Sem Cookies'})")
         
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
             ydl.download([url])
         
-        # Limpeza
-        if os.path.exists(cookie_file): os.remove(cookie_file)
-
+        # Verifica se baixou o MP3
         final_filename = f"{output_filename}.mp3"
-        if os.path.exists(final_filename): return final_filename
-        if os.path.exists(output_filename): return output_filename
+        if os.path.exists(final_filename):
+            if os.path.exists(cookie_file): os.remove(cookie_file)
+            return final_filename
+            
+        # Fallback: Às vezes o yt-dlp baixa mas não converte se o ffmpeg falhar
+        if os.path.exists(output_filename):
+            if os.path.exists(cookie_file): os.remove(cookie_file)
+            return output_filename
+
         return None
 
     except Exception as e:
         if os.path.exists(cookie_file): os.remove(cookie_file)
-        st.error(f"❌ Falha no download. O YouTube bloqueou o IP. Tente pegar os cookies frescos no seu navegador e colar na barra lateral.")
+        st.error(f"❌ Erro yt-dlp: {e}")
         return None
-    
+   
 def get_instagram_data_apify(url):
     run_input = {
         "directUrls": [url],
