@@ -306,64 +306,70 @@ def get_youtube_metadata(url):
 
 def download_youtube_audio(url, cookies_content=None):
     """
-    Baixa áudio do YouTube com Cookies e Headers para evitar erro 403.
+    Baixa áudio do YouTube usando Estratégia de Formato Legado (Arquivo Único).
+    Isso evita o erro 'fragment not found' e '403 Forbidden' em servidores de nuvem.
     """
     output_filename = "temp_yt_audio"
     cookie_file = "cookies_temp.txt"
     use_cookies = False
     
-    # Prepara o arquivo de cookies
     if cookies_content and len(cookies_content) > 50:
         with open(cookie_file, "w") as f:
             f.write(cookies_content)
         use_cookies = True
     
-    # Configuração BLINDADA do yt-dlp
+    # ESTRATÉGIA NUCLEAR:
+    # 1. 'format': '140' -> Tenta pegar áudio m4a direto (legado, sem vídeo).
+    # 2. '18' -> Se falhar, pega vídeo 360p (arquivo único mp4) e extrai o áudio.
+    # 3. 'bestaudio[protocol^=http]' -> Tenta qualquer áudio que não seja DASH (picotado).
     ydl_opts = {
-        'format': 'bestaudio/best', # Tenta o melhor áudio, se falhar, pega o melhor geral
+        'format': '140/18/bestaudio[protocol^=http]/best', 
         'outtmpl': output_filename,
         'postprocessors': [{
             'key': 'FFmpegExtractAudio',
             'preferredcodec': 'mp3',
             'preferredquality': '192',
         }],
-        'quiet': False, # Mudei para False para ver logs se precisar
-        'no_warnings': True,
+        'quiet': False, 
+        'no_warnings': True, 
         'nocheckcertificate': True,
-        'ignoreerrors': True, # Não trava se der erro num formato específico
-        
-        # Headers para fingir ser um Chrome Windows (deve bater com seus cookies)
-        'http_headers': {
-            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-            'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
-            'Accept-Language': 'en-us,en;q=0.5',
-        }
+        'ignoreerrors': True,
+        # Força uso de IPv4 pois IPv6 do Streamlit costuma ser bloqueado
+        'source_address': '0.0.0.0', 
     }
 
     if use_cookies:
         ydl_opts['cookiefile'] = cookie_file
-    else:
-        # Se não tem cookies, usa a tática da TV
-        ydl_opts['extractor_args'] = {
-            'youtube': {'player_client': ['android', 'web']}
+    
+    # Tenta enganar com cliente iOS (costuma ser menos restrito para formatos legado)
+    ydl_opts['extractor_args'] = {
+        'youtube': {
+            'player_client': ['ios', 'android'],
+            'player_skip': ['webpage', 'configs', 'js'], 
         }
+    }
 
     try:
-        st.info(f"🔄 Baixando YouTube... ({'Com Cookies' if use_cookies else 'Sem Cookies'})")
+        st.info(f"🔄 Baixando (Modo Legado/Arquivo Único)...")
         
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
             ydl.download([url])
         
-        # Verifica se baixou o MP3
-        final_filename = f"{output_filename}.mp3"
-        if os.path.exists(final_filename):
-            if os.path.exists(cookie_file): os.remove(cookie_file)
-            return final_filename
-            
-        # Fallback: Às vezes o yt-dlp baixa mas não converte se o ffmpeg falhar
-        if os.path.exists(output_filename):
-            if os.path.exists(cookie_file): os.remove(cookie_file)
-            return output_filename
+        if os.path.exists(cookie_file): os.remove(cookie_file)
+
+        # Verifica variações de nome que o yt-dlp pode ter gerado
+        possiveis_nomes = [f"{output_filename}.mp3", output_filename, f"{output_filename}.m4a"]
+        
+        for nome in possiveis_nomes:
+            if os.path.exists(nome):
+                # Garante que termina em .mp3 para o resto do código
+                if not nome.endswith('.mp3'):
+                    try:
+                        os.rename(nome, f"{output_filename}.mp3")
+                        return f"{output_filename}.mp3"
+                    except:
+                        return nome
+                return nome
 
         return None
 
@@ -371,7 +377,7 @@ def download_youtube_audio(url, cookies_content=None):
         if os.path.exists(cookie_file): os.remove(cookie_file)
         st.error(f"❌ Erro yt-dlp: {e}")
         return None
-   
+       
 def get_instagram_data_apify(url):
     run_input = {
         "directUrls": [url],
