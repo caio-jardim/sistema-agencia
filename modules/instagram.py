@@ -4,6 +4,8 @@ import time
 import requests
 from apify_client import ApifyClient
 from datetime import datetime, timedelta, timezone
+from moviepy.editor import VideoFileClip
+import os
 
 def pegar_dados_apify(perfil, dias, container_log):
     if "apify_token" not in st.secrets:
@@ -102,3 +104,36 @@ def baixar_video_with_retry(url, filename, retries=3):
                     return True
                 except: return False
     return False
+
+def download_file(url, filename):
+    """Baixa arquivo genérico via requests"""
+    try:
+        headers = {"User-Agent": "Mozilla/5.0"}
+        r = requests.get(url, headers=headers, stream=True)
+        r.raise_for_status()
+        with open(filename, 'wb') as f:
+            for chunk in r.iter_content(chunk_size=8192): f.write(chunk)
+        return True
+    except Exception as e:
+        st.error(f"Erro download arquivo: {e}")
+        return False
+
+def get_instagram_data_apify(url):
+    """Pega dados de um post específico do Instagram"""
+    if "apify_token" not in st.secrets: return None
+    client = ApifyClient(st.secrets["apify_token"])
+    
+    run_input = {
+        "directUrls": [url],
+        "resultsType": "posts",
+        "proxy": {"useApifyProxy": True, "apifyProxyGroups": ["RESIDENTIAL"]}
+    }
+    try:
+        run = client.actor("apify/instagram-scraper").call(run_input=run_input)
+        if not run: return None
+        dataset_items = client.dataset(run["defaultDatasetId"]).list_items().items
+        if dataset_items: return dataset_items[0]
+        return None
+    except Exception as e:
+        st.error(f"Erro na Apify Insta: {e}")
+        return None

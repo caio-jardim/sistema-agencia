@@ -3,8 +3,10 @@ import streamlit as st
 import os
 import json
 from groq import Groq
+import json
+from modules.prompts import SYSTEM_PROMPT_TEMPESTADE, SYSTEM_PROMPT_ARQUITETO
 from moviepy.editor import VideoFileClip
-from modules.prompts import PROMPT_ANALISE_GANCHO # <--- Importa o prompt
+from modules.prompts import PROMPT_ANALISE_GANCHO 
 
 def analisar_video_groq(video_path, status_box):
     if "groq" in st.secrets and "api_key" in st.secrets["groq"]:
@@ -60,3 +62,81 @@ def analisar_video_groq(video_path, status_box):
         status_box.error(f"Erro Groq: {e}")
         if os.path.exists(audio_path): os.remove(audio_path)
         return {"transcricao": "Erro API", "ganchos_verbais": "-"}
+
+def limpar_json(texto):
+    texto = texto.replace("```json", "").replace("```", "").strip()
+    start_arr = texto.find("[")
+    end_arr = texto.rfind("]")
+    start_obj = texto.find("{")
+    end_obj = texto.rfind("}")
+    
+    if start_arr != -1 and end_arr != -1 and (start_obj == -1 or start_arr < start_obj):
+        return texto[start_arr:end_arr+1]
+    if start_obj != -1 and end_obj != -1:
+        return texto[start_obj:end_obj+1]
+    return texto
+
+def transcrever_audio_groq(filepath):
+    if "groq" not in st.secrets: return None
+    client = Groq(api_key=st.secrets["groq"]["api_key"])
+    try:
+        with open(filepath, "rb") as file:
+            transcription = client.audio.transcriptions.create(
+                file=(filepath, file.read()),
+                model="whisper-large-v3",
+                response_format="text"
+            )
+        return str(transcription)
+    except Exception as e:
+        st.error(f"Erro na Transcrição: {e}")
+        return None
+
+def agente_tempestade_ideias(conteudo_base):
+    if "groq" not in st.secrets: return None
+    client = Groq(api_key=st.secrets["groq"]["api_key"])
+    try:
+        prompt_user = f"Analise este conteúdo e gere 3 conceitos:\n\nCONTEÚDO BASE:\n{conteudo_base[:12000]}"
+        completion = client.chat.completions.create(
+            messages=[
+                {"role": "system", "content": SYSTEM_PROMPT_TEMPESTADE},
+                {"role": "user", "content": prompt_user}
+            ],
+            model="llama-3.3-70b-versatile",
+            temperature=0.5,
+        )
+        texto_limpo = limpar_json(completion.choices[0].message.content)
+        return json.loads(texto_limpo)
+    except Exception as e:
+        st.error(f"Erro na IA Tempestade: {e}")
+        return None
+
+def agente_arquiteto_carrossel(ideia_escolhida, conteudo_base):
+    if "groq" not in st.secrets: return None
+    client = Groq(api_key=st.secrets["groq"]["api_key"])
+    try:
+        prompt_user = f"""
+        INSTRUÇÃO CRÍTICA: Baseie-se ESTRITAMENTE na transcrição/conteúdo abaixo.
+        === CONTEÚDO ORIGINAL ===
+        "{conteudo_base[:12000]}" 
+        =========================
+        CONCEITO: {ideia_escolhida['titulo']}
+        ESTRUTURA: {ideia_escolhida['estrutura']}
+        LÓGICA: {ideia_escolhida['por_que_funciona']}
+        """
+        
+        completion = client.chat.completions.create(
+            messages=[
+                {"role": "system", "content": SYSTEM_PROMPT_ARQUITETO},
+                {"role": "user", "content": prompt_user}
+            ],
+            model="llama-3.3-70b-versatile",
+            temperature=0.5,
+            top_p=0.9,
+            max_tokens=2048,
+            response_format={"type": "json_object"}
+        )
+        texto_limpo = limpar_json(completion.choices[0].message.content)
+        return json.loads(texto_limpo)
+    except Exception as e:
+        st.error(f"Erro na IA Arquiteto: {e}")
+        return None
