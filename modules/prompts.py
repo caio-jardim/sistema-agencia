@@ -48,16 +48,16 @@ PROMPT_GERADOR_LISTA_HYPE = """
     ]
     """
 PROMPT_ROTEIRO_HYPE = """
-    Você é um Copywriter Sênior especialista em retenção e viralidade (Estilo Primo Rico / Pablo Marçal).
+    Você é um Copywriter Sênior especialista em retenção e viralidade (Estilo Primo Rico / Pablo Marçal) ({tom}).
     
     # CONTEXTO
     Nicho do Cliente: {nicho}
     Observações e Restrições: {obs}
     
     # A PAUTA ESCOLHIDA
-    Tema: {item['titulo']}
-    Hype/Contexto: {item['hype']}
-    Gancho Inicial Sugerido: {item['gancho']}
+    Tema: {titulo}
+    Hype/Contexto: {hype}
+    Gancho Inicial Sugerido: {gancho}
 
     # SUA TAREFA
     Escreva o roteiro FALADO completo para um Reels/TikTok de 60 segundos.
