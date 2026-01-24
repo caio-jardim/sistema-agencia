@@ -306,78 +306,101 @@ def get_youtube_metadata(url):
 
 def download_youtube_audio(url, cookies_content=None):
     """
-    Baixa áudio do YouTube usando Estratégia de Formato Legado (Arquivo Único).
-    Isso evita o erro 'fragment not found' e '403 Forbidden' em servidores de nuvem.
+    Baixa áudio do YouTube usando uma API Intermediária (Cobalt/SaveFrom Logic).
+    Isso contorna 100% o bloqueio de IP do YouTube, pois quem baixa é o servidor deles.
     """
-    output_filename = "temp_yt_audio"
-    cookie_file = "cookies_temp.txt"
-    use_cookies = False
+    output_filename = "temp_yt_audio.mp3"
     
-    if cookies_content and len(cookies_content) > 50:
-        with open(cookie_file, "w") as f:
-            f.write(cookies_content)
-        use_cookies = True
+    # 1. Tenta usar a API do Cobalt (Melhor alternativa atual ao SaveFrom)
+    # Documentação: https://github.com/imputnet/cobalt
+    api_instances = [
+        "https://api.cobalt.tools/api/json",
+        "https://cobalt.api.kwiatekmiki.pl/api/json",
+    ]
     
-    # ESTRATÉGIA NUCLEAR:
-    # 1. 'format': '140' -> Tenta pegar áudio m4a direto (legado, sem vídeo).
-    # 2. '18' -> Se falhar, pega vídeo 360p (arquivo único mp4) e extrai o áudio.
-    # 3. 'bestaudio[protocol^=http]' -> Tenta qualquer áudio que não seja DASH (picotado).
-    ydl_opts = {
-        'format': '140/18/bestaudio[protocol^=http]/best', 
-        'outtmpl': output_filename,
-        'postprocessors': [{
-            'key': 'FFmpegExtractAudio',
-            'preferredcodec': 'mp3',
-            'preferredquality': '192',
-        }],
-        'quiet': False, 
-        'no_warnings': True, 
-        'nocheckcertificate': True,
-        'ignoreerrors': True,
-        # Força uso de IPv4 pois IPv6 do Streamlit costuma ser bloqueado
-        'source_address': '0.0.0.0', 
+    headers = {
+        "Accept": "application/json",
+        "Content-Type": "application/json",
+        "User-Agent": "Mozilla/5.0 (Compatible; Googlebot/2.1)"
+    }
+    
+    payload = {
+        "url": url,
+        "isAudioOnly": True,
+        "aFormat": "mp3",
+        "filenamePattern": "classic"
     }
 
-    if use_cookies:
-        ydl_opts['cookiefile'] = cookie_file
-    
-    # Tenta enganar com cliente iOS (costuma ser menos restrito para formatos legado)
-    ydl_opts['extractor_args'] = {
-        'youtube': {
-            'player_client': ['ios', 'android'],
-            'player_skip': ['webpage', 'configs', 'js'], 
-        }
-    }
+    st.info("🔄 Tentando download via Servidor Intermediário (Cobalt)...")
 
+    for api_url in api_instances:
+        try:
+            # Passo 1: Pedir o link de download para o intermediário
+            response = requests.post(api_url, json=payload, headers=headers, timeout=15)
+            
+            if response.status_code == 200:
+                data = response.json()
+                
+                if 'url' in data:
+                    download_link = data['url']
+                    
+                    # Passo 2: Baixar o arquivo do link gerado
+                    with requests.get(download_link, stream=True, timeout=60) as r:
+                        r.raise_for_status()
+                        with open(output_filename, 'wb') as f:
+                            for chunk in r.iter_content(chunk_size=8192):
+                                f.write(chunk)
+                    
+                    if os.path.exists(output_filename):
+                        return output_filename
+            
+        except Exception as e:
+            print(f"Instância {api_url} falhou: {e}")
+            continue # Tenta o próximo servidor
+
+    # 2. Se falhar, tenta yt-dlp como última esperança (com cookies se houver)
+    # (Manteve-se o código antigo aqui como fallback)
+    st.warning("⚠️ Intermediário falhou. Tentando conexão direta (pode falhar se IP estiver bloqueado)...")
+    
     try:
-        st.info(f"🔄 Baixando (Modo Legado/Arquivo Único)...")
+        import yt_dlp
+        cookie_file = "cookies_temp.txt"
+        use_cookies = False
+        if cookies_content and len(cookies_content) > 50:
+            with open(cookie_file, "w") as f: f.write(cookies_content)
+            use_cookies = True
+            
+        ydl_opts = {
+            'format': 'bestaudio/best',
+            'outtmpl': 'temp_yt_audio', # Sem extensão, deixa o yt-dlp decidir
+            'quiet': True,
+            'no_warnings': True,
+            'ignoreerrors': True,
+        }
+        if use_cookies: ydl_opts['cookiefile'] = cookie_file
         
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
             ydl.download([url])
-        
+            
         if os.path.exists(cookie_file): os.remove(cookie_file)
-
-        # Verifica variações de nome que o yt-dlp pode ter gerado
-        possiveis_nomes = [f"{output_filename}.mp3", output_filename, f"{output_filename}.m4a"]
         
-        for nome in possiveis_nomes:
-            if os.path.exists(nome):
-                # Garante que termina em .mp3 para o resto do código
-                if not nome.endswith('.mp3'):
+        # Procura o arquivo gerado (pode ser .mp3, .m4a, .webm)
+        for ext in ['.mp3', '.m4a', '.webm']:
+            fname = f"temp_yt_audio{ext}"
+            if os.path.exists(fname):
+                # Renomeia para .mp3 se necessário (para o resto do código funcionar)
+                if ext != '.mp3':
                     try:
-                        os.rename(nome, f"{output_filename}.mp3")
-                        return f"{output_filename}.mp3"
-                    except:
-                        return nome
-                return nome
-
-        return None
-
+                        os.rename(fname, output_filename)
+                        return output_filename
+                    except: pass
+                return fname
+                
     except Exception as e:
-        if os.path.exists(cookie_file): os.remove(cookie_file)
-        st.error(f"❌ Erro yt-dlp: {e}")
-        return None
-       
+        st.error(f"❌ Falha total: {e}")
+        
+    return None
+  
 def get_instagram_data_apify(url):
     run_input = {
         "directUrls": [url],
