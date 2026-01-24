@@ -38,7 +38,7 @@ if st.button("🚀 Iniciar Análise", type="primary"):
     ids_existentes = carregar_ids_existentes(sheet)
     st.write(f"📊 {len(ids_existentes)} vídeos já cadastrados.")
 
-    timestamp_coleta = datetime.now().strftime("%d/%m/%Y")
+    timestamp_coleta = datetime.now().strftime("%d/%m/%Y") # <--- AQUI ESTÁ A DEFINIÇÃO CORRETA
     
     if not os.path.exists('temp_videos_groq'): os.makedirs('temp_videos_groq')
 
@@ -87,9 +87,17 @@ if st.button("🚀 Iniciar Análise", type="primary"):
 
             # 4. Salvar
             nova_linha = [
-                id_video, timestamp, f"@{perfil}", v['data_str'], v['link'],
-                v['views'], v['likes'], v['comments'],
-                ia_data.get('transcricao', ''), ia_data.get('ganchos_verbais', ''), v['caption']
+                id_video, 
+                timestamp_coleta, # <--- CORRIGIDO AQUI (antes estava só 'timestamp')
+                f"@{perfil}", 
+                v['data_str'], 
+                v['link'],
+                v['views'], 
+                v['likes'], 
+                v['comments'],
+                ia_data.get('transcricao', ''), 
+                ia_data.get('ganchos_verbais', ''), 
+                v['caption']
             ]
             
             if salvar_linha_instagram(sheet, nova_linha):
