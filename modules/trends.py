@@ -29,7 +29,7 @@ def gerar_hypes_gemini(nicho, janela, tom, obs):
     if not configurar_gemini(): return []
     
     # Modelo mais rápido e barato para listas
-    model = genai.GenerativeModel('gemini-1.5-flash') 
+    model = genai.GenerativeModel('gemini-2.5-pro') 
     data_hoje = datetime.now().strftime("%d/%m/%Y")
     
     # --- AQUI ESTAVA O ERRO ---
