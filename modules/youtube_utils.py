@@ -6,7 +6,6 @@ from groq import Groq
 
 # --- FUNÇÃO AUXILIAR: WHISPER ---
 def transcrever_com_whisper_groq(caminho_arquivo):
-    """Lê o arquivo de áudio e manda para a Groq"""
     if "groq" not in st.secrets:
         return "Erro: Chave Groq não configurada."
     
@@ -25,10 +24,6 @@ def transcrever_com_whisper_groq(caminho_arquivo):
 
 # --- FUNÇÃO PRINCIPAL: APIFY ---
 def pegar_dados_youtube_apify(url):
-    """
-    1. Tenta pegar metadados e legendas (streamers/youtube-scraper).
-    2. Se falhar, baixa o áudio (daibolo/youtube-downloader) e usa Whisper.
-    """
     if "apify_token" not in st.secrets:
         st.error("❌ Token 'apify_token' não encontrado.")
         return None
@@ -36,39 +31,34 @@ def pegar_dados_youtube_apify(url):
     client = ApifyClient(st.secrets["apify_token"])
 
     # ---------------------------------------------------------
-    # PASSO 1: TENTAR PEGAR DADOS E LEGENDA (RÁPIDO)
+    # PASSO 1: TENTAR PEGAR LEGENDA (Sem baixar vídeo)
+    # Actor: streamers/youtube-scraper
     # ---------------------------------------------------------
-    st.info("1️⃣ Apify: Buscando dados e legendas...")
-    
-    run_input_meta = {
-        "startUrls": [{"url": url}],
-        "maxResults": 1,
-        "downloadSubtitles": True,
-        "saveSubsToKVS": False
-    }
+    st.info("1️⃣ Apify: Verificando legendas (Método Rápido)...")
     
     dados_finais = {}
     
     try:
-        # Usa o 'streamers/youtube-scraper' para metadados
-        run = client.actor("streamers/youtube-scraper").call(run_input=run_input_meta)
+        run_meta = client.actor("streamers/youtube-scraper").call(run_input={
+            "startUrls": [{"url": url}],
+            "maxResults": 1,
+            "downloadSubtitles": True,
+            "saveSubsToKVS": False
+        })
         
-        if run:
-            dataset_items = client.dataset(run["defaultDatasetId"]).list_items().items
-            if dataset_items:
-                item = dataset_items[0]
+        if run_meta:
+            items = client.dataset(run_meta["defaultDatasetId"]).list_items().items
+            if items:
+                item = items[0]
                 
-                # Monta a transcrição das legendas
-                transcricao_texto = ""
-                subtitles = item.get('subtitles', [])
-                
-                if isinstance(subtitles, list):
-                    for sub in subtitles:
+                # Extração de Legendas
+                txt = ""
+                subs = item.get('subtitles', [])
+                if isinstance(subs, list):
+                    for sub in subs:
                         if 'lines' in sub:
-                            for line in sub['lines']:
-                                transcricao_texto += line.get('text', '') + " "
-                        elif 'text' in sub:
-                            transcricao_texto += sub['text'] + " "
+                            for l in sub['lines']: txt += l.get('text', '') + " "
+                        elif 'text' in sub: txt += sub['text'] + " "
                 
                 dados_finais = {
                     "sucesso": True,
@@ -78,82 +68,72 @@ def pegar_dados_youtube_apify(url):
                     "views": item.get('viewCount', 0),
                     "likes": item.get('likes', 0),
                     "data_post": item.get('date', ''),
-                    "transcricao": transcricao_texto,
-                    "url": url,
-                    "description": item.get('description', '')
+                    "transcricao": txt,
+                    "description": item.get('description', ''),
+                    "url": url
                 }
     except Exception as e:
-        st.error(f"Erro na fase de metadados: {e}")
-        # Não retorna None aqui, tenta continuar para o download se possível
+        st.warning(f"Erro ao buscar metadados (Ignorando): {e}")
 
     # ---------------------------------------------------------
-    # PASSO 2: SE A LEGENDA VEIO VAZIA -> USAR WHISPER
+    # PASSO 2: SE NÃO TEM LEGENDA -> USAR EPCTEX + WHISPER
+    # Actor: epctex/youtube-video-downloader
     # ---------------------------------------------------------
     if not dados_finais.get("transcricao") or len(dados_finais["transcricao"]) < 50:
-        st.warning("⚠️ Legenda não encontrada. Iniciando Plano B: Download + Whisper...")
+        st.warning("⚠️ Sem legenda. Iniciando Plano B: Download via Apify (epctex)...")
         
-        # Usa 'daibolo/youtube-downloader' (Estável)
         run_input_down = {
-            "urls": [{"url": url}],
-            "maxVideoDuration": 1200, # Limite de 20 min para economizar
+            "videoUrls": [{"url": url}],
+            "quality": "low", # Baixa qualidade para ser rápido (o Whisper entende)
+            "maxVideoDuration": 20 # Limite de 20 minutos para segurança
         }
         
         try:
-            run_down = client.actor("daibolo/youtube-downloader").call(run_input=run_input_down)
+            # Chama o EPCTEX
+            run_down = client.actor("epctex/youtube-video-downloader").call(run_input=run_input_down)
             
             if run_down:
-                dataset_down = client.dataset(run_down["defaultDatasetId"]).list_items().items
+                items_down = client.dataset(run_down["defaultDatasetId"]).list_items().items
                 
-                audio_url = None
-                
-                if dataset_down:
-                    # O daibolo retorna várias streams. Vamos procurar a de áudio (m4a)
-                    # Primeiro, tenta pegar 'downloadUrl' direto se existir
-                    item_down = dataset_down[0]
+                if items_down:
+                    # O epctex retorna um link direto para o vídeo
+                    video_url = items_down[0].get('downloadUrl')
                     
-                    # Procura nos formatos
-                    formats = item_down.get('formats', [])
-                    for fmt in formats:
-                        # Prioriza m4a (audio)
-                        if fmt.get('extension') == 'm4a' or 'audio' in fmt.get('mimeType', ''):
-                            audio_url = fmt.get('url')
-                            break
-                    
-                    # Se não achou m4a, pega o primeiro mp4
-                    if not audio_url and formats:
-                        audio_url = formats[0].get('url')
-
-                    if audio_url:
-                        st.info("⬇️ Baixando stream de áudio...")
-                        caminho_audio = "temp_apify_audio.mp3"
+                    if video_url:
+                        st.info("⬇️ Link gerado! Baixando arquivo...")
                         
-                        # Headers para evitar 403 no download
-                        headers = {
-                            "User-Agent": "Mozilla/5.0",
-                            "Referer": "https://www.youtube.com/"
-                        }
+                        caminho_temp = "temp_apify.mp4"
                         
-                        with requests.get(audio_url, headers=headers, stream=True) as r:
+                        # Baixa o arquivo do link da Apify
+                        with requests.get(video_url, stream=True) as r:
                             r.raise_for_status()
-                            with open(caminho_audio, 'wb') as f:
+                            with open(caminho_temp, 'wb') as f:
                                 for chunk in r.iter_content(chunk_size=8192):
                                     f.write(chunk)
                         
-                        st.info("🧠 Processando no Whisper (Groq)...")
-                        texto_whisper = transcrever_com_whisper_groq(caminho_audio)
+                        st.info("🧠 Transcrevendo áudio (Groq Whisper)...")
+                        texto_whisper = transcrever_com_whisper_groq(caminho_temp)
                         
-                        # Atualiza a transcrição
+                        # Atualiza os dados
                         dados_finais["transcricao"] = texto_whisper
                         
-                        if os.path.exists(caminho_audio): os.remove(caminho_audio)
+                        # Se não tinha metadados antes (falha no passo 1), preenche básico
+                        if not dados_finais.get("titulo"):
+                            dados_finais["titulo"] = items_down[0].get('title', 'Vídeo YouTube')
+                            dados_finais["id_unico"] = url # Fallback
+                            
+                        # Limpa
+                        if os.path.exists(caminho_temp): os.remove(caminho_temp)
                         
                     else:
-                        st.error("Não foi possível extrair link de áudio do vídeo.")
-                        dados_finais["transcricao"] = "Sem áudio. Descrição: " + dados_finais.get('description', '')
+                        st.error("Apify não retornou URL de download.")
                 else:
-                    st.error("Downloader rodou mas não retornou streams.")
+                    st.error("Apify finalizou mas sem resultados (Dataset vazio).")
+            else:
+                st.error("Falha ao iniciar o Actor epctex.")
+                
         except Exception as e:
-            st.error(f"Erro no processo de download/whisper: {e}")
+            st.error(f"Erro fatal no download: {e}")
             dados_finais["transcricao"] = dados_finais.get('description', '')
 
     return dados_finais
