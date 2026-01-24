@@ -3,8 +3,8 @@ from apify_client import ApifyClient
 
 def pegar_dados_youtube_apify(url):
     """
-    Função MODULAR: Recebe URL do YouTube, chama Apify (Streampot)
-    e retorna metadados + transcrição limpa.
+    Função MODULAR: Recebe URL do YouTube, chama Apify (Actor Oficial)
+    e retorna metadados + transcrição.
     """
     # 1. Verifica Token
     if "apify_token" not in st.secrets:
@@ -13,20 +13,22 @@ def pegar_dados_youtube_apify(url):
         
     client = ApifyClient(st.secrets["apify_token"])
 
-    # 2. Configura o Robô (Actor: streampot/youtube-scraper)
-    # Docs: https://apify.com/streampot/youtube-scraper
+    # 2. Configura o Robô OFICIAL (apify/youtube-scraper)
+    # Docs: https://apify.com/apify/youtube-scraper
     run_input = {
-        "urls": [url],
-        "downloads": ["subtitles"], # O PULO DO GATO: Pede só a legenda
-        "maxResults": 1
+        "startUrls": [{"url": url}], # O formato oficial exige lista de objetos
+        "downloadSubtitles": True,   # Pede legendas
+        "maxResults": 1,
+        "resultsType": "details"     # Pega detalhes e legendas, não comentários
     }
     
     try:
         status_msg = st.empty()
-        status_msg.info("🔄 Módulo YouTube: Acessando Apify (Isso evita bloqueio de IP)...")
+        status_msg.info("🔄 Módulo YouTube: Acessando Apify Oficial (Bypassing IP Block)...")
         
-        # 3. Executa o Robô
-        run = client.actor("streampot/youtube-scraper").call(run_input=run_input)
+        # 3. Executa o Robô Oficial
+        # Substituímos o 'streampot' pelo 'apify/youtube-scraper'
+        run = client.actor("apify/youtube-scraper").call(run_input=run_input)
         
         if not run:
             status_msg.error("❌ Apify não retornou execução.")
@@ -35,22 +37,29 @@ def pegar_dados_youtube_apify(url):
         # 4. Pega os resultados
         dataset_items = client.dataset(run["defaultDatasetId"]).list_items().items
         
-        status_msg.empty() # Limpa a mensagem
+        status_msg.empty() 
         
         if dataset_items:
             item = dataset_items[0]
             
-            # 5. Processa a Transcrição (Junta os pedaços)
+            # 5. Processa a Transcrição
+            # O formato do apify/youtube-scraper retorna 'subtitles' como lista de dicts
             transcricao_texto = ""
             subtitles = item.get('subtitles', [])
             
+            # Procura legenda em Português ou Inglês (prioridade automática do scraper)
             if subtitles:
                 for sub in subtitles:
-                    # Tenta pegar o texto (as vezes vem como 'text', as vezes 'content')
-                    texto = sub.get('text') or sub.get('content') or ""
-                    transcricao_texto += texto + " "
+                    # Tenta pegar o texto das linhas
+                    lines = sub.get('lines', [])
+                    for line in lines:
+                        transcricao_texto += line.get('text', '') + " "
             
-            # Fallback: Se não tem legenda, usa descrição
+            # Fallback: Se a estrutura for diferente (texto corrido)
+            if not transcricao_texto and isinstance(subtitles, str):
+                transcricao_texto = subtitles
+
+            # Último Fallback: Descrição
             if not transcricao_texto:
                 transcricao_texto = item.get('description', '')
 
@@ -59,16 +68,16 @@ def pegar_dados_youtube_apify(url):
                 "sucesso": True,
                 "id_unico": item.get('id', ''),
                 "titulo": item.get('title', 'Sem Título'),
-                "canal": item.get('channel', {}).get('name', 'Desconhecido'),
+                "canal": item.get('channelName', item.get('channel', {}).get('name', 'Desconhecido')),
                 "views": item.get('viewCount', 0),
-                "likes": item.get('likeCount', 0),
-                "data_post": item.get('uploadDate', ''),
+                "likes": item.get('likes', 0), # As vezes vem como likeCount
+                "data_post": item.get('date', ''),
                 "transcricao": transcricao_texto,
                 "url": url
             }
             
         else:
-            st.warning("⚠️ Apify rodou, mas não achou o vídeo (pode ser privado ou deletado).")
+            st.warning("⚠️ Apify rodou, mas não retornou dados (Vídeo privado ou erro interno).")
             return None
 
     except Exception as e:
