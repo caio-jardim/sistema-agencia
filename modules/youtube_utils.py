@@ -1,67 +1,64 @@
 import streamlit as st
 import requests
 import os
-import time
+import json
 from apify_client import ApifyClient
 from groq import Groq
 
-# --- FUNÇÃO AUXILIAR 1: WHISPER (Transcreve Áudio) ---
+# --- WHISPER (Mantido) ---
 def transcrever_com_whisper_groq(caminho_arquivo):
-    if "groq" not in st.secrets:
-        return "Erro: Chave Groq não configurada."
-    
+    if "groq" not in st.secrets: return "Erro: Chave Groq não configurada."
     client = Groq(api_key=st.secrets["groq"]["api_key"])
-    
     try:
         with open(caminho_arquivo, "rb") as file:
-            transcription = client.audio.transcriptions.create(
+            return str(client.audio.transcriptions.create(
                 file=(caminho_arquivo, file.read()),
                 model="whisper-large-v3",
                 response_format="text"
-            )
-        return str(transcription)
-    except Exception as e:
-        return f"Erro na Transcrição Groq: {e}"
+            ))
+    except Exception as e: return f"Erro Transcrição: {e}"
 
-# --- FUNÇÃO AUXILIAR 2: COBALT (Faz o Download do Áudio) ---
-def baixar_audio_via_cobalt(url_youtube):
+# --- NOVO: COBALT MULTI-SERVER (Grátis) ---
+def baixar_audio_cobalt_gratis(url_youtube):
     """
-    Usa a API do Cobalt (similar ao SaveFrom) para gerar um link de áudio
-    e baixar o arquivo, contornando 100% dos bloqueios do YouTube.
+    Tenta baixar usando várias instâncias públicas do Cobalt.
+    É gratuito e roda fora do servidor da Apify.
     """
     output_filename = "temp_cobalt_audio.mp3"
     
-    # Instâncias públicas do Cobalt (Alternativas caso uma falhe)
-    api_instances = [
-        "https://api.cobalt.tools/api/json",
-        "https://cobalt.api.kwiatekmiki.pl/api/json",
-        "https://api.fnky.app/api/json"
+    # Lista de servidores alternativos (se um falhar, tenta o outro)
+    instances = [
+        "https://api.cobalt.tools/api/json",        # Oficial (muito tráfego)
+        "https://cobalt.api.kwiatekmiki.pl/api/json", # Polônia
+        "https://api.fnky.app/api/json",            # Alternativo
+        "https://cobalt.q1.si/api/json"             # Eslovênia
     ]
-    
-    headers = {
-        "Accept": "application/json",
-        "Content-Type": "application/json",
-        "User-Agent": "Mozilla/5.0"
-    }
     
     payload = {
         "url": url_youtube,
         "isAudioOnly": True,
         "aFormat": "mp3"
     }
+    
+    headers = {
+        "Accept": "application/json",
+        "Content-Type": "application/json",
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"
+    }
 
-    for api_url in api_instances:
+    st.info("🔄 Tentando servidores gratuitos de download (Cobalt)...")
+    
+    for i, api_url in enumerate(instances):
         try:
-            # 1. Pede o link
-            response = requests.post(api_url, json=payload, headers=headers, timeout=15)
+            # status_msg = st.toast(f"Tentando servidor {i+1}...", icon="📡")
+            response = requests.post(api_url, json=payload, headers=headers, timeout=10)
+            
             if response.status_code == 200:
                 data = response.json()
-                download_link = data.get('url')
-                
-                if download_link:
-                    st.info(f"⬇️ Baixando áudio do servidor intermediário...")
+                if 'url' in data:
+                    download_link = data['url']
                     
-                    # 2. Baixa o arquivo
+                    # Baixa o arquivo
                     with requests.get(download_link, stream=True, timeout=60) as r:
                         r.raise_for_status()
                         with open(output_filename, 'wb') as f:
@@ -71,90 +68,60 @@ def baixar_audio_via_cobalt(url_youtube):
                     if os.path.exists(output_filename):
                         return output_filename
         except:
-            continue # Tenta o próximo servidor se falhar
-            
+            continue # Silenciosamente tenta o próximo
+
     return None
 
 # --- FUNÇÃO PRINCIPAL ---
 def pegar_dados_youtube_apify(url):
-    """
-    Lógica Híbrida:
-    1. Tenta Apify para Legendas (Texto).
-    2. Se falhar, usa Cobalt para baixar MP3 + Whisper.
-    """
-    if "apify_token" not in st.secrets:
-        st.error("❌ Token 'apify_token' não encontrado.")
-        return None
-        
     client = ApifyClient(st.secrets["apify_token"])
-
-    # --- FASE 1: METADADOS E LEGENDA (APIFY) ---
-    st.info("1️⃣ Apify: Buscando dados e legendas...")
     
+    st.info("1️⃣ Buscando Legenda (Texto)...")
     dados_finais = {}
     
+    # 1. TENTA PEGAR LEGENDA (Rápido e Barato)
     try:
-        run_input = {
-            "startUrls": [{"url": url}],
-            "maxResults": 1,
-            "downloadSubtitles": True,
-            "saveSubsToKVS": False
-        }
-        
-        # Usa 'streamers/youtube-scraper' (Ótimo para metadados/texto)
-        run = client.actor("streamers/youtube-scraper").call(run_input=run_input)
-        
+        run = client.actor("streamers/youtube-scraper").call(run_input={
+            "startUrls": [{"url": url}], "maxResults": 1, "downloadSubtitles": True, "saveSubsToKVS": False
+        })
         if run:
-            dataset_items = client.dataset(run["defaultDatasetId"]).list_items().items
-            if dataset_items:
-                item = dataset_items[0]
-                
-                # Monta transcrição das legendas
-                transcricao_texto = ""
-                subtitles = item.get('subtitles', [])
-                
-                if isinstance(subtitles, list):
-                    for sub in subtitles:
-                        if 'lines' in sub:
-                            for line in sub['lines']:
-                                transcricao_texto += line.get('text', '') + " "
-                        elif 'text' in sub:
-                            transcricao_texto += sub['text'] + " "
+            items = client.dataset(run["defaultDatasetId"]).list_items().items
+            if items:
+                item = items[0]
+                txt = ""
+                # Lógica simplificada de extração
+                subs = item.get('subtitles', [])
+                if isinstance(subs, list):
+                    for s in subs:
+                        if 'lines' in s: 
+                            for l in s['lines']: txt += l.get('text', '') + " "
+                        elif 'text' in s: txt += s['text'] + " "
                 
                 dados_finais = {
-                    "sucesso": True,
+                    "sucesso": True, "transcricao": txt, 
+                    "titulo": item.get('title', 'YouTube Video'),
                     "id_unico": item.get('id', ''),
-                    "titulo": item.get('title', 'Sem Título'),
-                    "canal": item.get('channelName', 'Desconhecido'),
-                    "views": item.get('viewCount', 0),
-                    "likes": item.get('likes', 0),
-                    "data_post": item.get('date', ''),
-                    "transcricao": transcricao_texto,
-                    "url": url,
                     "description": item.get('description', '')
                 }
-    except Exception as e:
-        st.error(f"Erro na fase de metadados: {e}")
+    except: pass
 
-    # --- FASE 2: PLANO B (DOWNLOAD + WHISPER) ---
-    # Se a transcrição veio vazia (vídeo sem legenda), ativamos o Cobalt
+    # 2. SE NÃO TEM LEGENDA -> COBALT (GRÁTIS) + WHISPER
     if not dados_finais.get("transcricao") or len(dados_finais["transcricao"]) < 50:
-        st.warning("⚠️ Legenda não encontrada. Iniciando Plano B: Download (Cobalt) + Whisper...")
+        st.warning("⚠️ Sem legenda. Tentando download gratuito...")
         
-        caminho_audio = baixar_audio_via_cobalt(url)
+        audio_path = baixar_audio_cobalt_gratis(url)
         
-        if caminho_audio:
-            st.info("🧠 Processando no Whisper (Groq)...")
-            texto_whisper = transcrever_com_whisper_groq(caminho_audio)
+        if audio_path:
+            st.success("⬇️ Download concluído! Transcrevendo...")
+            texto = transcrever_com_whisper_groq(audio_path)
+            dados_finais["transcricao"] = texto
+            if os.path.exists(audio_path): os.remove(audio_path)
             
-            # Salva a nova transcrição
-            dados_finais["transcricao"] = texto_whisper
-            
-            # Limpa o arquivo
-            if os.path.exists(caminho_audio): os.remove(caminho_audio)
+            # Preenche dados faltantes se o passo 1 falhou totalmente
+            if not dados_finais.get("titulo"):
+                dados_finais.update({"titulo": "Vídeo Transcrito", "id_unico": url, "description": ""})
         else:
-            st.error("❌ Falha: Não foi possível baixar o áudio do vídeo.")
-            # Último recurso: usa a descrição
-            dados_finais["transcricao"] = "Sem áudio. Descrição: " + dados_finais.get('description', '')
+            st.error("❌ Não foi possível baixar o vídeo automaticamente.")
+            return {"sucesso": False, "erro": "download_failed"}
 
     return dados_finais
