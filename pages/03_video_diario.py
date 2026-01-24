@@ -1,237 +1,92 @@
 import streamlit as st
-import google.generativeai as genai
-from datetime import datetime
-from groq import Groq
-import json
-import re
+from modules.auth import check_password
+from modules.trends import gerar_hypes_gemini, escrever_roteiro_groq
 
-# --- CONFIGURAÇÃO DA PÁGINA ---
-st.set_page_config(page_title="Gerador de Hypes - Gemini", page_icon="🔥", layout="wide")
-
+# --- CONFIGURAÇÃO ---
+st.set_page_config(page_title="Gerador de Hypes", page_icon="🔥", layout="wide")
 st.title("🔥 Gerador de Pautas Virais")
 st.markdown("---")
 
 # --- LOGIN ---
-def check_password():
-    if "password_correct" in st.session_state and st.session_state["password_correct"]:
-        return True
-    
-    def password_entered():
-        if st.session_state["password"] == st.secrets["general"]["team_password"]:
-            st.session_state["password_correct"] = True
-            del st.session_state["password"]
-        else:
-            st.session_state["password_correct"] = False
-
-    st.text_input("Senha:", type="password", on_change=password_entered, key="password")
-    return False
-
 if not check_password():
     st.stop()
 
-# --- CONFIGURAÇÃO GEMINI ---
-try:
-    genai.configure(api_key=st.secrets["gemini"]["api_marcio"])
-except Exception as e:
-    st.error("Erro ao configurar API do Gemini. Verifique o secrets.toml")
-    st.stop()
-
-# --- INPUTS ---
+# --- SIDEBAR ---
 with st.sidebar:
-    st.header("🎯 Configuração do Radar")
-    
+    st.header("🎯 Radar de Tendências")
     nicho = st.text_input("Seu Nicho", "Holding Familiar")
     
-    janela_tempo = st.selectbox(
-        "Janela de Tempo", 
-        ["Hoje (Últimas 24h)", "Última Semana", "Último Mês"],
-        index=1
+    janela_tempo = st.selectbox("Janela de Tempo", ["Hoje", "Última Semana"], index=0)
+    
+    # NOVIDADE: Escolha do Tom
+    tom_voz = st.selectbox(
+        "Estilo do Conteúdo", 
+        ["Polêmico (Estilo Pablo Marçal)", "Educativo (Professor)", "Analítico (Economista)", "Motivacional"]
     )
-
-    # --- NOVO CAMPO SOLICITADO ---
+    
     st.markdown("---")
-    st.header("🕵️ Persona & Restrições")
-    observacoes = st.text_area(
-        "Observações Específicas", 
-        placeholder="Ex: Advogado para público 40+, patrimônio alto. NÃO falar de sucessão, focar em proteção em vida.",
-        height=100
-    )
-    
-    st.info("💡 A IA irá cruzar fatos atuais com o nicho, respeitando suas observações.")
+    st.header("🕵️ Restrições")
+    observacoes = st.text_area("Obs:", placeholder="Ex: Não falar de política partidária...", height=100)
 
-# --- FUNÇÕES ---
-
-def limpar_json(texto):
-    """Remove formatações de markdown que a IA às vezes coloca"""
-    texto = texto.replace("```json", "").replace("```", "")
-    return texto
-
-def gerar_lista_hypes(nicho, janela, obs):
-    # Usando o modelo flash para velocidade na geração da lista
-    model = genai.GenerativeModel('gemini-2.5-pro') 
-    data_hoje = datetime.now().strftime("%d/%m/%Y")
-    
-    prompt = f"""
-    # Role
-    Você é um estrategista de conteúdo Sênior, especializado em Marketing de Influência e "Newsjacking" (técnica de aproveitar notícias quentes para promover marcas). Seu estilo de escrita é inspirado em influenciadores de alta performance como "O Primo Rico" ou "Pablo Marçal": direto, levemente polêmico, focado em oportunidade/medo, e com alta autoridade.
-
-    # Contexto
-    - Data Atual: {data_hoje}
-    - Janela de Análise: {janela}
-    - Nicho do Cliente: {nicho}
-    - OBSERVAÇÕES E RESTRIÇÕES DO CLIENTE: "{obs}"
-    (ATENÇÃO: Respeite rigorosamente as observações acima. Se pedir para evitar um tema, evite).
-
-    # Tarefa
-    Gere 20 ideias de roteiros de vídeos curtos (Reels/TikTok) baseados nos assuntos mais quentes ("Hypes") do momento exato da data atual.
-
-    # Regras de Criação (O Método "Primo Rico")
-    1. **Diversidade:** Não fale apenas de economia. Misture:
-       - 30% Economia/Dinheiro (Impostos, Bancos, Investimentos).
-       - 30% Pop Culture/Fofoca (BBB, Divórcios de famosos, Memes do Twitter/X, Futebol, Filmes).
-       - 20% Política/Leis (Novas regras, falas de presidentes, geopolítica).
-       - 20% Cotidiano/Medo (Crimes, Doenças, Clima, Preços).
-    2. **A Ponte (O Gancho):** O segredo é a conexão. Você deve pegar um assunto que NÃO tem nada a ver com o nicho e criar uma conexão lógica e surpreendente.
-       - Exemplo errado: "O dólar subiu, contrate meu estúdio." (Chato).
-       - Exemplo certo: "O dólar subiu e seu equipamento ficou 30% mais caro de repor. Se seu estúdio pegar fogo hoje, o seguro cobre o preço antigo ou o novo? Vamos falar de atualização patrimonial."
-    3. **Tom de Voz:** Urgência, Oportunidade ou Indignação. Use gatilhos mentais.
-
-    # Formato de Saída (JSON ESTRITO)
-    Para que o sistema leia, retorne APENAS um Array JSON válido. Não use Markdown de código (```json).
-    Siga estritamente esta estrutura de chaves:
-    [
-        {{
-            "titulo": "Nome do Tema Curto e Chamativo",
-            "hype": "Explique em 2 linhas por que isso está sendo falado hoje. Qual é a polêmica ou a dor?",
-            "gancho": "Escreva o roteiro falado (speech) que o especialista deve dizer. Comece comentando a notícia e termine vendendo a necessidade do serviço/produto do nicho. Seja persuasivo."
-        }},
-        ...
-    ]
-    """
-    
-    try:
-        response = model.generate_content(prompt)
-        texto_limpo = limpar_json(response.text)
-        return json.loads(texto_limpo)
-    except Exception as e:
-        st.error(f"Erro ao gerar lista: {e}")
-        return []
-
-def expandir_roteiro_final(item, nicho, obs):
-    # Acessa diretamente a chave no bloco [groq] do secrets.toml
-    # Sem try/except para garantir que ele leia o valor real
-    client = Groq(api_key=st.secrets["groq"]["api_key"])
-
-    prompt = f"""
-    Você é um Copywriter Sênior especialista em retenção e viralidade (Estilo Primo Rico / Pablo Marçal).
-    
-    # CONTEXTO
-    Nicho do Cliente: {nicho}
-    Observações e Restrições: {obs}
-    
-    # A PAUTA ESCOLHIDA
-    Tema: {item['titulo']}
-    Hype/Contexto: {item['hype']}
-    Gancho Inicial Sugerido: {item['gancho']}
-
-    # SUA TAREFA
-    Escreva o roteiro FALADO completo para um Reels/TikTok de 60 segundos.
-    
-    # ESTRUTURA DO ROTEIRO (Use Markdown):
-    
-    ### 1. GANCHO VISUAL E VERBAL (0-5s)
-    (Use o gancho sugerido acima, mas refine para ser impossível de ignorar. Descreva o que aparece na tela).
-    
-    ### 2. A CONEXÃO (5-20s)
-    (Explique o hype rapidamente e conecte imediatamente com a dor do cliente. Use "Você").
-    
-    ### 3. O MEDO OU A OPORTUNIDADE (20-45s)
-    (Desenvolva o raciocínio. Por que quem ignora isso vai perder dinheiro ou ter problemas? Seja enfático).
-    
-    ### 4. A SOLUÇÃO ELITIZADA (45-60s)
-    (Apresente a solução do {nicho} como a única saída inteligente).
-    
-    ### 5. CTA (Chamada para Ação)
-    (Uma frase curta e direta para seguir ou comentar).
-    
-    IMPORTANTE: O texto deve ser conversacional, direto e sem enrolação.
-    """
-    
-    try:
-        completion = client.chat.completions.create(
-            model="llama-3.3-70b-versatile",
-            messages=[{"role": "user", "content": prompt}],
-            temperature=0.7 
-        )
-        return completion.choices[0].message.content
-    except Exception as e:
-        return f"Erro na Groq: {e}"
-# --- INTERFACE PRINCIPAL ---
-
-col1, col2 = st.columns([2, 1])
-with col1:
-    st.write(f"Gerando pautas para: **{nicho}**")
+# --- BOTÃO DE AÇÃO ---
+col1, col2 = st.columns([3, 1])
 with col2:
-    btn_gerar = st.button("🚀 Gerar 20 Pautas", type="primary", use_container_width=True)
+    btn_gerar = st.button("🚀 Buscar Hypes", type="primary", use_container_width=True)
 
-# Lógica de Estado (Session State) para manter os dados na tela
+# --- LÓGICA DE GERAÇÃO (SESSION STATE) ---
 if btn_gerar:
     if not nicho:
         st.warning("Preencha o nicho.")
     else:
-        with st.spinner("🧠 Analisando hypes e cruzando dados..."):
-            pautas = gerar_lista_hypes(nicho, janela_tempo, observacoes)
+        with st.spinner(f"🔍 O Gemini está varrendo a internet por hypes para {nicho}..."):
+            # Chama a função do módulo trends.py
+            pautas = gerar_hypes_gemini(nicho, janela_tempo, tom_voz, observacoes)
+            
             if pautas:
-                st.session_state['pautas_geradas'] = pautas
-                st.session_state['roteiro_expandido'] = None # Limpa roteiro anterior
+                st.session_state['pautas_hype'] = pautas
+                st.session_state['roteiro_hype_ativo'] = None
             else:
-                st.error("Falha ao gerar JSON. Tente novamente.")
+                st.error("O Gemini não retornou pautas válidas. Tente novamente.")
 
-# --- EXIBIÇÃO EM BLOCOS (CARDS) ---
-if 'pautas_geradas' in st.session_state:
-    st.markdown("---")
-    st.subheader(f"📋 20 Ideias Encontradas para: {nicho}")
+# --- EXIBIÇÃO DOS CARDS (GRID LAYOUT) ---
+if 'pautas_hype' in st.session_state:
+    st.markdown("### 📋 Tópicos em Alta Identificados")
     
-    pautas = st.session_state['pautas_geradas']
+    pautas = st.session_state['pautas_hype']
     
-    # Loop para criar os cartões
+    # Cria uma grid de 2 colunas para ficar mais bonito
+    cols = st.columns(2)
+    
     for i, pauta in enumerate(pautas):
-        with st.container(border=True):
-            col_a, col_b = st.columns([4, 1])
-            
-            with col_a:
-                st.markdown(f"### {i+1}. {pauta['titulo']}")
-                st.caption(f"🔥 **Hype:** {pauta['hype']}")
-                st.markdown(f"🗣️ **Gancho Sugerido:** *{pauta['gancho']}*")
-            
-            with col_b:
-                st.write("") # Espaçamento
-                if st.button("✨ Escrever Roteiro", key=f"btn_rot_{i}"):
-                    st.session_state['pauta_ativa'] = pauta
-                    # Força rerun para mostrar o roteiro embaixo imediatamente
+        # Alterna entre coluna 0 e 1
+        with cols[i % 2]:
+            with st.container(border=True):
+                st.markdown(f"#### {i+1}. {pauta.get('titulo', 'Sem Título')}")
+                st.caption(f"🔥 **Hype:** {pauta.get('hype')}")
+                st.info(f"🗣️ **Gancho:** {pauta.get('gancho')}")
+                
+                if st.button("✨ Escrever Roteiro", key=f"btn_h_{i}", use_container_width=True):
+                    st.session_state['pauta_hype_selecionada'] = pauta
                     st.rerun()
 
-# --- ÁREA DE ROTEIRO FINAL ---
-if 'pauta_ativa' in st.session_state:
-    st.markdown("---")
-    st.subheader(f"🎬 Roteiro Final: {st.session_state['pauta_ativa']['titulo']}")
+# --- ROTEIRO FINAL ---
+if 'pauta_hype_selecionada' in st.session_state:
+    pauta = st.session_state['pauta_hype_selecionada']
     
-    with st.spinner("Escrevendo roteiro completo..."):
-        # Gera o roteiro apenas se mudou a pauta ou ainda não gerou
-        roteiro = expandir_roteiro_final(
-            st.session_state['pauta_ativa'], 
-            nicho, 
-            observacoes
-        )
-        
-        st.success("Roteiro criado!")
-        with st.container(border=True):
-            st.markdown(roteiro)
-            
-    # Botão para limpar/fechar
-    if st.button("Fechar Roteiro"):
-        del st.session_state['pauta_ativa']
+    st.markdown("---")
+    st.subheader(f"🎬 Roteiro: {pauta['titulo']}")
+    
+    # Verifica se já gerou o texto para não gastar API a cada refresh
+    if st.session_state.get('roteiro_hype_texto') is None or st.session_state.get('last_pauta_title') != pauta['titulo']:
+        with st.spinner("✍️ A Groq está escrevendo o roteiro..."):
+            texto_roteiro = escrever_roteiro_groq(pauta, nicho, tom_voz, observacoes)
+            st.session_state['roteiro_hype_texto'] = texto_roteiro
+            st.session_state['last_pauta_title'] = pauta['titulo']
+    
+    # Exibe o roteiro
+    with st.container(border=True):
+        st.markdown(st.session_state['roteiro_hype_texto'])
+    
+    if st.button("Fechar"):
+        del st.session_state['pauta_hype_selecionada']
         st.rerun()
-
-# --- RODAPÉ ---
-st.markdown("---")
