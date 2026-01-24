@@ -12,7 +12,7 @@ from modules.youtube_utils import pegar_dados_youtube_apify
 
 # --- CONFIGURAÇÃO DA PÁGINA ---
 st.set_page_config(page_title="Gerador de Carrosséis", page_icon="🎠", layout="wide")
-st.title("🎠 Gerador de Carrosséis: Método Tempestade")
+st.title("🎠 Gerador de Carrosséis")
 st.markdown("Transforme qualquer conteúdo (YouTube, Reels ou Post) em estruturas validadas.")
 st.markdown("---")
 
@@ -23,8 +23,7 @@ if not check_password():
 # --- SIDEBAR ---
 with st.sidebar:
     st.header("⚙️ Configuração")
-    st.info("O sistema usa Apify/Cobalt para contornar bloqueios automaticamente.")
-
+    
 # --- INPUTS ---
 col_tipo, col_foco = st.columns([1, 1])
 

@@ -1,68 +1,94 @@
 import streamlit as st
+from modules.auth import check_password
+from modules.ui import carregar_css
 
-
-# Configuração da Página (Título e Ícone da aba)
+# --- CONFIGURAÇÃO ---
 st.set_page_config(
-    page_title="Agência Marketing OS",
+    page_title="E21 STUDIO",
     page_icon="🚀",
     layout="wide"
 )
 
-# --- SISTEMA DE LOGIN (Copie e cole logo após os imports) ---
-def check_password():
-    """Retorna True se o usuário tiver a senha correta."""
-    def password_entered():
-        """Checa se a senha inserida bate com a dos segredos."""
-        if st.session_state["password"] == st.secrets["general"]["team_password"]:
-            st.session_state["password_correct"] = True
-            del st.session_state["password"]  # Não manter a senha na memória
-        else:
-            st.session_state["password_correct"] = False
+# 1. Injeta o CSS (Fontes, sombras, botões arredondados)
+carregar_css()
 
-    # Se a senha já foi validada, retorna True
-    if "password_correct" in st.session_state:
-        if st.session_state["password_correct"]:
-            return True
-
-    # Se não, mostra o campo de senha
-    st.markdown("### 🔒 Acesso Restrito - Equipe E21")
-    st.text_input(
-        "Digite a senha de acesso:", 
-        type="password", 
-        on_change=password_entered, 
-        key="password"
-    )
-    
-    if "password_correct" in st.session_state:
-        if not st.session_state["password_correct"]:
-            st.error("😕 Senha incorreta. Tente novamente.")
-            
-    return False
-
-# BLOQUEIO DE SEGURANÇA
-# Se a senha não for verificada, o script para de rodar aqui.
+# 2. Sistema de Login (Modular)
 if not check_password():
     st.stop()
 
+# --- HEADER (CABEÇALHO COM HTML/CSS) ---
+st.markdown("""
+    <div style="text-align: center; padding: 2rem 0; margin-bottom: 2rem;">
+        <h1 style="font-size: 3.5rem; margin-bottom: 0.5rem; background: -webkit-linear-gradient(45deg, #F63366, #FF8E53); -webkit-background-clip: text; -webkit-text-fill-color: transparent;">
+            Agência OS
+        </h1>
+        <p style="font-size: 1.2rem; color: #555;">
+            Sistema Central de Inteligência Artificial e Automação
+        </p>
+    </div>
+""", unsafe_allow_html=True)
 
-# Título Principal
-st.title("🚀 Equipe E21 Studio")
-st.markdown("### Bem-vindo ao Sistema Central de Automação")
-st.markdown("---")
+# --- DASHBOARD (GRID DE FERRAMENTAS) ---
+st.markdown("### 🛠️ Hub de Ferramentas")
+st.markdown("Selecione uma ferramenta no menu lateral para começar.")
 
-# Layout de Dashboard simples
-col1, col2 = st.columns(2)
+# Layout em 3 colunas para parecer um "Software"
+col1, col2, col3 = st.columns(3)
 
+# CARD 1: INSTAGRAM
 with col1:
-    st.info("👈 **Use o menu lateral** para acessar as ferramentas.")
-    st.markdown("""
-    **Ferramentas Disponíveis:**
-    
-    1.  **Instagram Insights:** Análise básica de métricas e Top Posts.
-    2.  **Gerador de Roteiros:** Cria scripts virais baseados em "modelagem".
-    3.  **Vídeo Diário:** Gera temas da semana e ganchos com o nicho selecionado.
-    """)
+    with st.container(border=True):
+        st.markdown("### 📊 Viral Analyzer")
+        st.caption("Página 01")
+        st.markdown("""
+        **Função:** Analisa perfis do Instagram, baixa Reels e extrai métricas.
+        
+        * 🕵️ Monitoramento de Concorrentes
+        * 📈 Extração de Top Posts
+        * 💾 Banco de Dados Automático
+        """)
+        st.info("Status: ✅ Operacional")
 
-# Rodapé
+# CARD 2: VÍDEO DIÁRIO (HYPES)
+with col2:
+    with st.container(border=True):
+        st.markdown("### 🔥 Radar de Hypes")
+        st.caption("Página 03")
+        st.markdown("""
+        **Função:** Varre a internet em busca de tendências e cria conexões com seu nicho.
+        
+        * 🌍 Notícias em Tempo Real (Gemini)
+        * ✍️ Roteiros Polêmicos ou Educativos
+        * ⚡ Newsjacking Automático
+        """)
+        st.info("Status: ✅ Operacional")
+
+# CARD 3: GERADOR DE CARROSSEL
+with col3:
+    with st.container(border=True):
+        st.markdown("### 🎠 Fábrica de Carrosséis")
+        st.caption("Página 04")
+        st.markdown("""
+        **Função:** Transforma vídeos ou links em carrosséis de retenção.
+        
+        * 🧠 IA Estrategista (Viral vs Vendas)
+        * 🏗️ Arquiteto de Slides
+        * 📥 Download YouTube/Insta Integrado
+        """)
+        st.info("Status: ✅ Operacional")
+
+# --- ÁREA DE NOTIFICAÇÕES / ATALHOS ---
 st.markdown("---")
-st.caption("Uso Interno")
+c1, c2 = st.columns([2, 1])
+
+with c1:
+    st.markdown("#### 📢 Atualizações do Sistema")
+    st.success("24/01: Módulo 'Gerador de Carrossel' atualizado com IA de Vendas (Mentor).")
+    st.info("23/01: Integração Apify + Cobalt para downloads sem bloqueio.")
+
+with c2:
+    st.markdown("#### 🔒 Segurança")
+    st.caption(f"Logado como: **Equipe E21**")
+    if st.button("Sair / Logout"):
+        del st.session_state["password_correct"]
+        st.rerun()
