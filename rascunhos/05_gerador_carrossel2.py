@@ -78,4 +78,4 @@ if st.button("🚀 Testar Módulo Novo"):
                     else:
                         st.json(ideias)
         else:
-            st.error("Falha na extração. Verifique os logs acima.")
+            st.error("Falha na extração. Verifique os logs acima.") 

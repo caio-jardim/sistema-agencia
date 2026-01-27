@@ -3,7 +3,7 @@ import os
 import time
 from moviepy.editor import VideoFileClip
 
-# --- IMPORTAÇÃO DOS MÓDULOS (A Mágica da Organização) ---
+# --- IMPORTAÇÃO DOS MÓDULOS ---
 from modules.auth import check_password
 from modules.database import conectar_sheets, verificar_existencia_db, salvar_no_db
 from modules.instagram import get_instagram_data_apify, download_file
@@ -23,7 +23,8 @@ if not check_password():
 # --- SIDEBAR ---
 with st.sidebar:
     st.header("⚙️ Configuração")
-    
+    st.info("O sistema usa Apify/Cobalt para evitar bloqueios automaticamente.")
+
 # --- INPUTS ---
 col_tipo, col_foco = st.columns([1, 1])
 
@@ -31,7 +32,6 @@ with col_tipo:
     tipo_conteudo = st.radio("Origem:", ["YouTube", "Reels (Instagram)", "Carrossel (Instagram)"])
 
 with col_foco:
-    # SELETOR DE MODO (Viral vs Vendas)
     foco_analise = st.radio(
         "Foco da IA:", 
         ["Conteúdo (Viral)", "Vendas (Mentor)"], 
@@ -49,13 +49,13 @@ if st.button("⚡ Analisar e Gerar Conceitos", type="primary"):
         st.session_state['conteudo_base'] = None 
         st.session_state['ideias_geradas'] = None
         st.session_state['roteiro_final'] = None
+        st.session_state['url_ref'] = url_input # Salva URL para o export final
         
         status = st.status("Iniciando processo...", expanded=True)
         texto_extraido = ""
         
         # 1. CONEXÃO COM BANCO DE DADOS
-        gs_client = conectar_sheets() # Retorna a aba, mas usamos o .spreadsheet dentro das funcoes
-        
+        gs_client = conectar_sheets() 
         aba_alvo = "Youtube" if tipo_conteudo == "YouTube" else "instagram"
         transcricao_db = None
         
@@ -111,7 +111,6 @@ if st.button("⚡ Analisar e Gerar Conceitos", type="primary"):
 
                     if tipo_conteudo == "Reels (Instagram)":
                         v_url = data.get('videoUrl') or data.get('video_url')
-                        # Baixa vídeo temporário para transcrever
                         if v_url and download_file(v_url, "temp.mp4"):
                             try:
                                 vc = VideoFileClip("temp.mp4")
@@ -143,7 +142,6 @@ if st.button("⚡ Analisar e Gerar Conceitos", type="primary"):
         if texto_extraido:
             st.session_state['conteudo_base'] = texto_extraido
             
-            # AQUI ACONTECE A MÁGICA DO BOTÃO NOVO
             status.write(f"🧠 Gerando conceitos (Modo: {foco_analise})...")
             ideias = agente_tempestade_ideias(texto_extraido, modo=foco_analise)
             
@@ -165,12 +163,10 @@ if 'ideias_geradas' in st.session_state and st.session_state['ideias_geradas']:
     for i, ideia in enumerate(ideias):
         with st.container(border=True):
             col_txt, col_btn = st.columns([4, 1])
-            
             with col_txt:
                 st.markdown(f"### {i+1}. {ideia.get('titulo', 'Sem Título')}")
                 st.caption(f"📐 **Estrutura:** {ideia.get('estrutura', '-')}")
                 st.write(f"💡 {ideia.get('por_que_funciona', '-')}")
-            
             with col_btn:
                 st.write("")
                 st.write("")
@@ -179,11 +175,12 @@ if 'ideias_geradas' in st.session_state and st.session_state['ideias_geradas']:
                     st.session_state['roteiro_final'] = None 
                     st.rerun()
 
-# --- GERAÇÃO DO ROTEIRO FINAL ---
+# --- EDITOR DE ROTEIRO ---
 if 'ideia_ativa' in st.session_state:
     st.markdown("---")
     st.info(f"🏗️ Projetando Carrossel: **{st.session_state['ideia_ativa'].get('titulo')}**")
     
+    # Gera o roteiro se ainda não existir
     if st.session_state.get('roteiro_final') is None:
         with st.spinner("O Arquiteto está desenhando os slides..."):
             roteiro_json = agente_arquiteto_carrossel(
@@ -194,7 +191,9 @@ if 'ideia_ativa' in st.session_state:
             st.rerun()
             
     roteiro = st.session_state.get('roteiro_final')
+    
     if roteiro and 'carrossel' in roteiro:
+        # Metadados
         meta = roteiro.get('meta_dados', {})
         if meta:
             c1, c2, c3 = st.columns(3)
@@ -202,19 +201,57 @@ if 'ideia_ativa' in st.session_state:
             c2.metric("Slides", meta.get('total_slides', '-'))
             c3.caption(f"Tema: {meta.get('tema', '-')}")
             
-        st.success("Projeto Finalizado! 👇")
+        st.markdown("### ✏️ Editor de Slides")
+        st.caption("Faça seus ajustes abaixo. O texto é salvo automaticamente.")
         
-        for slide in roteiro['carrossel']:
+        # Loop de Edição
+        slides = roteiro['carrossel']
+        for i, slide in enumerate(slides):
             with st.container(border=True):
-                c1, c2 = st.columns([1, 4])
-                with c1:
-                    st.markdown(f"#### Painel {slide.get('painel', '#')}")
-                    st.caption(f"**{slide.get('fase', 'Fase')}**")
-                with c2:
-                    st.code(slide.get('texto', ''), language="text")
-                    st.info(slide.get('nota_engenharia', ''))
-    
-    if st.button("Fechar Projeto"):
+                col_meta, col_edit = st.columns([1, 3])
+                
+                with col_meta:
+                    st.markdown(f"#### Slide {slide.get('painel', i+1)}")
+                    st.caption(f"**Fase:** {slide.get('fase', '-')}")
+                    
+                    # Nota de engenharia (Visualização apenas)
+                    with st.expander("Engenharia (Nota)"):
+                        st.info(slide.get('nota_engenharia', '-'))
+
+                with col_edit:
+                    # TEXT AREA EDITÁVEL
+                    # Atualiza diretamente o session_state quando o usuário digita
+                    novo_texto = st.text_area(
+                        label="Conteúdo do Slide (Editável)",
+                        value=slide.get('texto', ''),
+                        height=150,
+                        key=f"slide_edit_{i}"
+                    )
+                    
+                    # Salva a alteração na memória em tempo real
+                    st.session_state['roteiro_final']['carrossel'][i]['texto'] = novo_texto
+
+        # --- ÁREA DE EXPORTAÇÃO ---
+        st.markdown("---")
+        st.subheader("📋 Área de Transferência (Docs)")
+        
+        # Monta o texto final com as edições feitas
+        titulo_final = meta.get('tema', 'Carrossel')
+        link_ref = st.session_state.get('url_ref', 'Link não salvo')
+        
+        texto_exportacao = f"CARROSSEL: {titulo_final}\n"
+        texto_exportacao += f"Referência: {link_ref}\n\n"
+        
+        for slide in st.session_state['roteiro_final']['carrossel']:
+            num = slide.get('painel', '#')
+            txt = slide.get('texto', '')
+            texto_exportacao += f"SLIDE {num}:\n{txt}\n\n"
+            
+        st.code(texto_exportacao, language="text")
+        st.success("👆 Clique no ícone de copiar no canto superior direito do bloco acima para levar ao Google Docs.")
+
+    # Botão Fechar
+    if st.button("Fechar Projeto", type="secondary"):
         del st.session_state['ideia_ativa']
         st.session_state['roteiro_final'] = None
         st.rerun()
