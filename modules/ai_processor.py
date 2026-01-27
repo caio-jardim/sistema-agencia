@@ -151,7 +151,7 @@ def agente_arquiteto_carrossel(ideia_escolhida, conteudo_base):
         prompt_user = f"""
         INSTRUÇÃO CRÍTICA: Baseie-se ESTRITAMENTE na transcrição/conteúdo abaixo.
         === CONTEÚDO ORIGINAL ===
-        "{conteudo_base[:12000]}" 
+        "{conteudo_base[:15000]}" 
         =========================
         CONCEITO: {ideia_escolhida.get('titulo')}
         ESTRUTURA: {ideia_escolhida.get('estrutura')}
