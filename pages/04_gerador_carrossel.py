@@ -49,7 +49,8 @@ if st.button("⚡ Analisar e Gerar Conceitos", type="primary"):
         st.session_state['conteudo_base'] = None 
         st.session_state['ideias_geradas'] = None
         st.session_state['roteiro_final'] = None
-        st.session_state['url_ref'] = url_input # Salva URL para o export final
+        st.session_state['url_ref'] = url_input 
+        st.session_state['ideia_ativa'] = None # Garante limpeza da ideia anterior
         
         status = st.status("Iniciando processo...", expanded=True)
         texto_extraido = ""
@@ -176,7 +177,7 @@ if 'ideias_geradas' in st.session_state and st.session_state['ideias_geradas']:
                     st.rerun()
 
 # --- EDITOR DE ROTEIRO ---
-if 'ideia_ativa' in st.session_state:
+if 'ideia_ativa' in st.session_state and st.session_state['ideia_ativa']:
     st.markdown("---")
     st.info(f"🏗️ Projetando Carrossel: **{st.session_state['ideia_ativa'].get('titulo')}**")
     
@@ -204,7 +205,11 @@ if 'ideia_ativa' in st.session_state:
         st.markdown("### ✏️ Editor de Slides")
         st.caption("Faça seus ajustes abaixo. O texto é salvo automaticamente.")
         
-        # Loop de Edição
+        # --- A CORREÇÃO ESTÁ AQUI ---
+        # Criamos um ID único baseado no título da ideia para usar na KEY
+        # Isso força o Streamlit a criar novas caixas de texto quando a ideia muda
+        unique_id = str(hash(st.session_state['ideia_ativa']['titulo']))
+        
         slides = roteiro['carrossel']
         for i, slide in enumerate(slides):
             with st.container(border=True):
@@ -214,18 +219,16 @@ if 'ideia_ativa' in st.session_state:
                     st.markdown(f"#### Slide {slide.get('painel', i+1)}")
                     st.caption(f"**Fase:** {slide.get('fase', '-')}")
                     
-                    # Nota de engenharia (Visualização apenas)
                     with st.expander("Engenharia (Nota)"):
                         st.info(slide.get('nota_engenharia', '-'))
 
                 with col_edit:
-                    # TEXT AREA EDITÁVEL
-                    # Atualiza diretamente o session_state quando o usuário digita
+                    # KEY ÚNICA: Usa o unique_id do projeto
                     novo_texto = st.text_area(
                         label="Conteúdo do Slide (Editável)",
                         value=slide.get('texto', ''),
                         height=150,
-                        key=f"slide_edit_{i}"
+                        key=f"slide_edit_{unique_id}_{i}" # <--- O SEGREDO
                     )
                     
                     # Salva a alteração na memória em tempo real
@@ -235,7 +238,6 @@ if 'ideia_ativa' in st.session_state:
         st.markdown("---")
         st.subheader("📋 Área de Transferência (Docs)")
         
-        # Monta o texto final com as edições feitas
         titulo_final = meta.get('tema', 'Carrossel')
         link_ref = st.session_state.get('url_ref', 'Link não salvo')
         
@@ -248,7 +250,7 @@ if 'ideia_ativa' in st.session_state:
             texto_exportacao += f"SLIDE {num}:\n{txt}\n\n"
             
         st.code(texto_exportacao, language="text")
-        st.success("👆 Clique no ícone de copiar no canto superior direito do bloco acima para levar ao Google Docs.")
+        st.success("👆 Clique no ícone de copiar no canto superior direito do bloco acima.")
 
     # Botão Fechar
     if st.button("Fechar Projeto", type="secondary"):
