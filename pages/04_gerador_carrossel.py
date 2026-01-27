@@ -50,14 +50,22 @@ if st.button("⚡ Analisar e Gerar Conceitos", type="primary"):
         st.session_state['ideias_geradas'] = None
         st.session_state['roteiro_final'] = None
         st.session_state['url_ref'] = url_input 
-        st.session_state['ideia_ativa'] = None # Garante limpeza da ideia anterior
+        st.session_state['ideia_ativa'] = None 
         
         status = st.status("Iniciando processo...", expanded=True)
         texto_extraido = ""
         
         # 1. CONEXÃO COM BANCO DE DADOS
         gs_client = conectar_sheets() 
-        aba_alvo = "Youtube" if tipo_conteudo == "YouTube" else "instagram"
+        
+        # Define o nome correto da aba baseado no tipo
+        if tipo_conteudo == "YouTube":
+            aba_alvo = "Youtube"
+        elif tipo_conteudo == "Carrossel (Instagram)":
+            aba_alvo = "carrossel" # <--- ABA NOVA
+        else:
+            aba_alvo = "instagram" # Reels
+            
         transcricao_db = None
         
         # 2. VERIFICA SE JÁ EXISTE NO BANCO
@@ -73,10 +81,9 @@ if st.button("⚡ Analisar e Gerar Conceitos", type="primary"):
             status.write("⚠️ Novo link. Iniciando extração...")
             dados_para_salvar = {}
             
-            # --- EXTRAÇÃO YOUTUBE (MODULAR) ---
+            # --- YOUTUBE ---
             if tipo_conteudo == "YouTube":
                 yt_data = pegar_dados_youtube_apify(url_input)
-                
                 if yt_data and yt_data.get('sucesso'):
                     texto_extraido = yt_data.get('transcricao', '')
                     dados_para_salvar = {
@@ -91,13 +98,12 @@ if st.button("⚡ Analisar e Gerar Conceitos", type="primary"):
                     }
                 else:
                     status.update(label="Falha no YouTube", state="error")
-                    st.error("Não foi possível extrair dados do YouTube.")
+                    st.error("Não foi possível extrair dados.")
 
-            # --- EXTRAÇÃO INSTAGRAM (MODULAR) ---
-            elif tipo_conteudo in ["Reels (Instagram)", "Carrossel (Instagram)"]:
+            # --- REELS (INSTAGRAM) ---
+            elif tipo_conteudo == "Reels (Instagram)":
                 status.write("🕵️ Acessando Apify (Instagram)...")
                 data = get_instagram_data_apify(url_input)
-                
                 if data:
                     dados_para_salvar = {
                         "id_unico": data.get('id', ''),
@@ -109,30 +115,69 @@ if st.button("⚡ Analisar e Gerar Conceitos", type="primary"):
                         "comments": data.get('commentsCount', 0),
                         "caption": data.get('caption', '') 
                     }
+                    v_url = data.get('videoUrl') or data.get('video_url')
+                    if v_url and download_file(v_url, "temp.mp4"):
+                        try:
+                            vc = VideoFileClip("temp.mp4")
+                            vc.audio.write_audiofile("temp.mp3", verbose=False, logger=None)
+                            vc.close()
+                            status.write("👂 Transcrevendo áudio...")
+                            texto_extraido = transcrever_audio_groq("temp.mp3")
+                        except Exception as e: 
+                            st.error(f"Erro áudio: {e}")
+                        finally:
+                            if os.path.exists("temp.mp4"): os.remove("temp.mp4")
+                            if os.path.exists("temp.mp3"): os.remove("temp.mp3")
 
-                    if tipo_conteudo == "Reels (Instagram)":
-                        v_url = data.get('videoUrl') or data.get('video_url')
-                        if v_url and download_file(v_url, "temp.mp4"):
-                            try:
-                                vc = VideoFileClip("temp.mp4")
-                                vc.audio.write_audiofile("temp.mp3", verbose=False, logger=None)
-                                vc.close()
-                                status.write("👂 Transcrevendo áudio...")
-                                texto_extraido = transcrever_audio_groq("temp.mp3")
-                            except Exception as e: 
-                                st.error(f"Erro processamento áudio: {e}")
-                            finally:
-                                if os.path.exists("temp.mp4"): os.remove("temp.mp4")
-                                if os.path.exists("temp.mp3"): os.remove("temp.mp3")
+            # --- CARROSSEL (INSTAGRAM) - NOVO ---
+            elif tipo_conteudo == "Carrossel (Instagram)":
+                status.write("🕵️ Lendo Carrossel (Apify)...")
+                data = get_instagram_data_apify(url_input)
+                
+                if data:
+                    # Monta o objeto para salvar
+                    dados_para_salvar = {
+                        "id_unico": data.get('id', ''),
+                        "perfil": data.get('ownerUsername', ''),
+                        "data_postagem": data.get('timestamp', '')[:10],
+                        "url": url_input,
+                        "views": data.get('viewCount') or data.get('playCount', 0), # As vezes vem viewCount em posts
+                        "likes": data.get('likesCount', 0),
+                        "comments": data.get('commentsCount', 0),
+                        "caption": data.get('caption', '') 
+                    }
                     
-                    elif tipo_conteudo == "Carrossel (Instagram)":
-                        cap = data.get('caption') or ""
-                        alts = [c.get('alt') for c in (data.get('childPosts') or []) if c.get('alt')]
-                        texto_extraido = f"LEGENDA:\n{cap}\nVISUAL:\n{' '.join(alts)}"
+                    # Lógica de Extração de Texto do Carrossel
+                    # A Groq não vê imagem, então montamos um "Roteiro de Leitura"
+                    status.write("📑 Extraindo textos dos slides...")
+                    
+                    # 1. Pega a legenda
+                    txt_final = f"=== LEGENDA DO POST ===\n{data.get('caption', '')}\n\n"
+                    txt_final += "=== CONTEÚDO DOS SLIDES (TEXTO ALTERNATIVO/OCR) ===\n"
+                    
+                    # 2. Itera sobre os slides (childPosts)
+                    slides = data.get('childPosts', [])
+                    if not slides:
+                        # As vezes o carrossel vem sem childPosts se for imagem única ou erro
+                        # Tenta pegar displayUrl ou alt da imagem principal
+                        alt = data.get('alt') or "Imagem única sem descrição."
+                        txt_final += f"Slide Único: {alt}"
+                    else:
+                        for i, slide in enumerate(slides):
+                            # Tenta pegar Alt Text ou Descrição
+                            texto_slide = slide.get('alt') or slide.get('description') or slide.get('accessibilityCaption')
+                            if not texto_slide:
+                                texto_slide = "[Imagem sem texto detectado pela API]"
+                            
+                            txt_final += f"SLIDE {i+1}: {texto_slide}\n"
+                    
+                    texto_extraido = txt_final
 
             # 4. SALVAR NO BANCO
             if texto_extraido and gs_client:
                 dados_para_salvar["transcricao"] = texto_extraido
+                
+                # Reels tem gancho, Carrossel não necessariamente (salva direto na col Transcricao_Carrossel)
                 if aba_alvo == "instagram":
                     dados_para_salvar["gancho_verbal"] = texto_extraido[:100] + "..."
                 
@@ -152,7 +197,7 @@ if st.button("⚡ Analisar e Gerar Conceitos", type="primary"):
             else:
                 status.update(label="Erro na IA (JSON)", state="error")
         else:
-            status.update(label="Falha na extração ou transcrição vazia", state="error")
+            status.update(label="Falha na extração ou texto vazio", state="error")
 
 # --- VISUALIZAÇÃO DOS RESULTADOS ---
 if 'ideias_geradas' in st.session_state and st.session_state['ideias_geradas']:
@@ -205,9 +250,7 @@ if 'ideia_ativa' in st.session_state and st.session_state['ideia_ativa']:
         st.markdown("### ✏️ Editor de Slides")
         st.caption("Faça seus ajustes abaixo. O texto é salvo automaticamente.")
         
-        # --- A CORREÇÃO ESTÁ AQUI ---
-        # Criamos um ID único baseado no título da ideia para usar na KEY
-        # Isso força o Streamlit a criar novas caixas de texto quando a ideia muda
+        # ID ÚNICO PARA O CACHE
         unique_id = str(hash(st.session_state['ideia_ativa']['titulo']))
         
         slides = roteiro['carrossel']
@@ -223,15 +266,12 @@ if 'ideia_ativa' in st.session_state and st.session_state['ideia_ativa']:
                         st.info(slide.get('nota_engenharia', '-'))
 
                 with col_edit:
-                    # KEY ÚNICA: Usa o unique_id do projeto
                     novo_texto = st.text_area(
                         label="Conteúdo do Slide (Editável)",
                         value=slide.get('texto', ''),
                         height=150,
-                        key=f"slide_edit_{unique_id}_{i}" # <--- O SEGREDO
+                        key=f"slide_edit_{unique_id}_{i}"
                     )
-                    
-                    # Salva a alteração na memória em tempo real
                     st.session_state['roteiro_final']['carrossel'][i]['texto'] = novo_texto
 
         # --- ÁREA DE EXPORTAÇÃO ---
@@ -252,7 +292,6 @@ if 'ideia_ativa' in st.session_state and st.session_state['ideia_ativa']:
         st.code(texto_exportacao, language="text")
         st.success("👆 Clique no ícone de copiar no canto superior direito do bloco acima.")
 
-    # Botão Fechar
     if st.button("Fechar Projeto", type="secondary"):
         del st.session_state['ideia_ativa']
         st.session_state['roteiro_final'] = None
