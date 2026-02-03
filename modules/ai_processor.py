@@ -174,3 +174,45 @@ def agente_arquiteto_carrossel(ideia_escolhida, conteudo_base):
     except Exception as e:
         st.error(f"Erro na IA Arquiteto: {e}")
         return None
+
+def transcrever_arquivo_upload_groq(uploaded_file):
+    """
+    Recebe um arquivo do st.file_uploader, salva temporariamente,
+    transcreve via Groq (Ultra Rápido) e retorna o texto.
+    """
+    if "groq" not in st.secrets:
+        st.error("Chave Groq não configurada.")
+        return None
+
+    client = Groq(api_key=st.secrets["groq"]["api_key"])
+    
+    # 1. Salvar o arquivo temporariamente no disco
+    # O Streamlit mantém o arquivo na RAM, a Groq precisa ler do disco ou buffer nomeado
+    temp_filename = f"temp_{uploaded_file.name}"
+    
+    try:
+        with open(temp_filename, "wb") as f:
+            f.write(uploaded_file.getbuffer())
+        
+        # 2. Enviar para a Groq (Modelo Whisper Large v3)
+        # Isso substitui o processamento local pesado
+        with open(temp_filename, "rb") as file:
+            transcription = client.audio.transcriptions.create(
+                file=(temp_filename, file.read()),
+                model="whisper-large-v3", # Modelo mais preciso e rápido do mundo atualmente
+                response_format="text",
+                language="pt" # Força português
+            )
+            
+        # 3. Limpeza
+        if os.path.exists(temp_filename):
+            os.remove(temp_filename)
+            
+        return str(transcription)
+
+    except Exception as e:
+        st.error(f"Erro na transcrição: {e}")
+        # Garante a limpeza mesmo se der erro
+        if os.path.exists(temp_filename):
+            os.remove(temp_filename)
+        return None
